@@ -209,11 +209,11 @@ For complete API documentation, see the inline documentation in the source code 
 
 ## Pricing
 
-Visit [grantiva.com](https://grantiva.com) for current pricing and plan details.
+Visit [grantiva.io](https://grantiva.io) for current pricing and plan details.
 
 ## Support
 
-- **Documentation**: [docs.grantiva.com](https://docs.grantiva.com)
+- **Documentation**: [[docs.grantiva.com](https://docs.grantiva.com)](https://grantiva.io/documentation)
 - **Email**: support@grantiva.com
 - **Issues**: Please open an issue on GitHub
 - **Sales**: sales@grantiva.com
