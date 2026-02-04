@@ -16,7 +16,7 @@ internal class PlatformSupport {
         let service = IOServiceGetMatchingService(kIOMasterPortDefault, IOServiceMatching("IOPlatformExpertDevice"))
         var serialNumber: String = "unknown"
         
-        if let serialNumberAsCFString = IORegistryEntryCreateCFProperty(service, kIOPlatformSerialNumberKey, kCFAllocatorDefault, 0)?.takeUnretainedValue() {
+        if let serialNumberAsCFString = IORegistryEntryCreateCFProperty(service, kIOPlatformSerialNumberKey as CFString, kCFAllocatorDefault, 0)?.takeUnretainedValue() {
             if CFGetTypeID(serialNumberAsCFString) == CFStringGetTypeID() {
                 serialNumber = String(serialNumberAsCFString as! CFString)
             }

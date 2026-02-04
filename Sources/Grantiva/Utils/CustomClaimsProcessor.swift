@@ -2,12 +2,12 @@ import Foundation
 
 internal class CustomClaimsProcessor {
     
-    static func processCustomClaims(_ claims: [String: AnyCodable]?) -> [String: Any] {
+    static func processCustomClaims(_ claims: [String: String]?) -> [String: Any] {
         guard let claims = claims else {
             return [:]
         }
-        
-        return claims.mapValues { $0.value }
+
+        return claims.mapValues { $0 as Any }
     }
     
     static func extractClaimValue<T>(from claims: [String: Any], key: String, as type: T.Type) -> T? {

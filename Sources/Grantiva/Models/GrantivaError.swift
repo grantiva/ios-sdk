@@ -10,7 +10,9 @@ public enum GrantivaError: LocalizedError {
     case keyGenerationFailed
     case challengeExpired
     case invalidResponse
-    
+    case rateLimited
+    case feedbackNotAvailable
+
     public var errorDescription: String? {
         switch self {
         case .deviceNotSupported:
@@ -31,9 +33,13 @@ public enum GrantivaError: LocalizedError {
             return "Challenge has expired and needs to be refreshed"
         case .invalidResponse:
             return "Invalid response received from server"
+        case .rateLimited:
+            return "Too many requests. Please try again later"
+        case .feedbackNotAvailable:
+            return "Feedback service is not available for this tenant"
         }
     }
-    
+
     public var failureReason: String? {
         switch self {
         case .deviceNotSupported:
@@ -54,6 +60,10 @@ public enum GrantivaError: LocalizedError {
             return "Server challenge has expired"
         case .invalidResponse:
             return "Server returned an unexpected response format"
+        case .rateLimited:
+            return "You have exceeded the rate limit for this action"
+        case .feedbackNotAvailable:
+            return "Your current plan may not include feedback features"
         }
     }
 }

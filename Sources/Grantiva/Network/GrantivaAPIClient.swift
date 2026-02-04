@@ -17,12 +17,11 @@ internal class GrantivaAPIClient {
     
     func requestChallenge() async throws -> ChallengeResponse {
         let url = URL(string: "\(configuration.baseURL)/api/v1/attestation/challenge")!
-        
+
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue(getBundleId(), forHTTPHeaderField: "X-Bundle-ID")
-        request.setValue(teamId, forHTTPHeaderField: "X-Team-ID")
+        applyAuth(to: &request)
         
         do {
             let (data, response) = try await session.data(for: request)
@@ -52,8 +51,7 @@ internal class GrantivaAPIClient {
         var httpRequest = URLRequest(url: url)
         httpRequest.httpMethod = "POST"
         httpRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        httpRequest.setValue(getBundleId(), forHTTPHeaderField: "X-Bundle-ID")
-        httpRequest.setValue(teamId, forHTTPHeaderField: "X-Team-ID")
+        applyAuth(to: &httpRequest)
         
         do {
             let jsonData = try JSONEncoder().encode(request)
@@ -99,8 +97,17 @@ internal class GrantivaAPIClient {
         }
     }
     
+    private func applyAuth(to request: inout URLRequest) {
+        if let apiKey = configuration.apiKey {
+            request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        } else {
+            request.setValue(getBundleId(), forHTTPHeaderField: "X-Bundle-ID")
+            request.setValue(teamId, forHTTPHeaderField: "X-Team-ID")
+        }
+    }
+
     private func getBundleId() -> String {
         return Bundle.main.bundleIdentifier ?? ""
     }
-    
+
 }

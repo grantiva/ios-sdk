@@ -1,12 +1,12 @@
-// swift-tools-version: 5.4
+// swift-tools-version: 6.0
 
 import PackageDescription
 
 let package = Package(
     name: "Grantiva",
     platforms: [
-        .iOS(.v14),
-        .macOS(.v11)
+        .iOS(.v18),
+        .macOS(.v15)
     ],
     products: [
         .library(
