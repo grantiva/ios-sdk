@@ -21,6 +21,18 @@ public class Grantiva {
         return FeedbackService(apiClient: feedbackClient, identity: identity)
     }()
 
+    /// Lazy-initialized feature flag service for remote configuration.
+    ///
+    /// ```swift
+    /// let flags = try await grantiva.flags.getFlags()
+    /// if flags["dark_mode"]?.boolValue == true { enableDarkMode() }
+    /// let limit = try await grantiva.flags.intValue(for: "upload_limit", default: 10)
+    /// ```
+    public private(set) lazy var flags: FlagService = {
+        let flagClient = FlagAPIClient(configuration: configuration, teamId: teamId)
+        return FlagService(apiClient: flagClient, identity: identity)
+    }()
+
     /// - Parameters:
     ///   - teamId: Your Apple Team ID.
     ///   - apiKey: Optional API key for simulator / development use where App Attest is unavailable.
@@ -59,8 +71,9 @@ public class Grantiva {
     /// - Parameter context: The user context including identifier and custom properties.
     public func identify(_ context: UserContext) async {
         identity.identify(context)
-        // Clear feedback caches so queries re-fetch with the new identity
+        // Clear caches so queries re-fetch with the new identity
         await feedback.clearCache()
+        await flags.clearCache()
     }
 
     /// Convenience: identify with just a user ID and no custom properties.
@@ -84,6 +97,7 @@ public class Grantiva {
     public func clearIdentity() async {
         identity.clearIdentity()
         await feedback.clearCache()
+        await flags.clearCache()
     }
 
     /// The currently identified user ID, or `nil` if no user has been identified.
@@ -166,7 +180,20 @@ public class Grantiva {
             keyId: keyId,
             attestationObject: attestationObject.base64EncodedString(),
             clientDataHash: clientDataHash,
-            challenge: challengeResponse.challenge
+            challenge: challengeResponse.challenge,
+            deviceModel: PlatformSupport.getHardwareModel(),
+            osVersion: PlatformSupport.getOSVersion(),
+            appVersion: PlatformSupport.getAppVersion(),
+            appBuildNumber: PlatformSupport.getAppBuildNumber(),
+            platform: {
+                #if os(iOS)
+                return "iOS"
+                #elseif os(macOS)
+                return "macOS"
+                #else
+                return nil
+                #endif
+            }()
         )
         
         print("[Grantiva] Sending attestation request:")
