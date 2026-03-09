@@ -12,6 +12,14 @@ internal struct AttestationRequest: Codable {
     let attestationObject: String
     let clientDataHash: String
     let challenge: String
+
+    // Device metadata — sent alongside attestation so the backend doesn't need
+    // to guess from CBOR (which doesn't contain this data).
+    let deviceModel: String?
+    let osVersion: String?
+    let appVersion: String?
+    let appBuildNumber: String?
+    let platform: String?
 }
 
 internal struct AttestationResponse: Codable {
