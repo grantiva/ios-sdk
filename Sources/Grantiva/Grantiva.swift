@@ -5,6 +5,7 @@ public class Grantiva {
     private let keyManager: KeyManager
     private let attestationManager: AttestationManager
     private let tokenManager: TokenManager
+    private let heartbeatManager: HeartbeatManager
     private let teamId: String
     private let configuration: GrantivaConfiguration
     internal let identity: IdentityProvider
@@ -48,6 +49,12 @@ public class Grantiva {
         self.keyManager = KeyManager()
         self.attestationManager = AttestationManager(teamId: teamId)
         self.tokenManager = TokenManager()
+        let isAPIKey = apiKey != nil
+        self.heartbeatManager = HeartbeatManager(
+            apiClient: HeartbeatAPIClient(configuration: config, teamId: teamId),
+            getToken: { [tokenManager] in tokenManager.getStoredToken()?.token },
+            getDeviceId: { isAPIKey ? PlatformSupport.getDeviceIdentifier() : nil }
+        )
     }
 
     /// Associate a user identity and context with this Grantiva instance.
@@ -111,13 +118,13 @@ public class Grantiva {
     }
     
     public func validateAttestation() async throws -> AttestationResult {
-        print("[Grantiva] Starting attestation validation...")
+        Logger.info("Starting attestation validation...")
 
         // When an API key is configured (e.g. simulator / dev builds), skip the
         // real App Attest flow entirely.  The API key already authenticates the
         // tenant on the backend, so device attestation is unnecessary.
         if configuration.apiKey != nil {
-            print("[Grantiva] API key mode — returning synthetic attestation result")
+            Logger.info("API key mode — returning synthetic attestation result")
             let deviceIntelligence = DeviceIntelligence(
                 deviceId: PlatformSupport.getDeviceIdentifier(),
                 riskScore: 0,
@@ -126,6 +133,7 @@ public class Grantiva {
                 attestationCount: 0,
                 lastAttestationDate: nil
             )
+            heartbeatManager.start()
             return AttestationResult(
                 isValid: true,
                 token: "simulator-dev-token",
@@ -138,7 +146,7 @@ public class Grantiva {
         
         if let storedToken = tokenManager.getStoredToken() {
             if !tokenManager.isTokenExpired(storedToken.expiresAt) {
-                print("[Grantiva] Using cached token")
+                Logger.debug("Using cached token")
                 let deviceIntelligence = DeviceIntelligence(
                     deviceId: PlatformSupport.getDeviceIdentifier(),
                     riskScore: 0,
@@ -157,22 +165,21 @@ public class Grantiva {
             }
         }
         
-        print("[Grantiva] Requesting challenge from server...")
+        Logger.info("Requesting challenge from server...")
         let challengeResponse = try await apiClient.requestChallenge()
-        print("[Grantiva] Received challenge: \(challengeResponse.challenge)")
-        
-        print("[Grantiva] Getting or creating key ID...")
+        Logger.debug("Received challenge: \(challengeResponse.challenge)")
+
+        Logger.info("Getting or creating key ID...")
         let keyId = try await keyManager.getOrCreateKeyId()
-        print("[Grantiva] Key ID: \(keyId)")
-        
-        print("[Grantiva] Generating attestation object...")
+        Logger.debug("Key ID: \(keyId)")
+
+        Logger.info("Generating attestation object...")
         let attestationObject = try await attestationManager.generateAttestation(keyId: keyId, challenge: challengeResponse.challenge)
-        print("[Grantiva] Attestation object size: \(attestationObject.count) bytes")
-        
+        Logger.debug("Attestation object size: \(attestationObject.count) bytes")
+
         let clientDataHashData = attestationManager.createClientDataHash(challenge: challengeResponse.challenge)
         let clientDataHash = clientDataHashData.base64EncodedString()
-        print("[Grantiva] Client data hash (hex): \(clientDataHashData.map { String(format: "%02x", $0) }.joined())")
-        print("[Grantiva] Client data hash (base64): \(clientDataHash)")
+        Logger.debug("Client data hash: \(clientDataHash)")
         
         let attestationRequest = AttestationRequest(
             bundleId: Bundle.main.bundleIdentifier ?? "",
@@ -196,17 +203,10 @@ public class Grantiva {
             }()
         )
         
-        print("[Grantiva] Sending attestation request:")
-        print("[Grantiva]   Bundle ID: \(attestationRequest.bundleId)")
-        print("[Grantiva]   Team ID: \(attestationRequest.teamId)")
-        print("[Grantiva]   Key ID: \(attestationRequest.keyId)")
-        print("[Grantiva]   Challenge: \(attestationRequest.challenge)")
-        print("[Grantiva]   Attestation object (first 100 chars): \(attestationRequest.attestationObject.prefix(100))...")
-        
+        Logger.debug("Sending attestation for bundle: \(attestationRequest.bundleId), team: \(attestationRequest.teamId)")
+
         let response = try await apiClient.validateAttestation(attestationRequest)
-        print("[Grantiva] Attestation validation response received")
-        print("[Grantiva]   Is valid: \(response.isValid)")
-        print("[Grantiva]   Token (first 50 chars): \(response.token.prefix(50))...")
+        Logger.info("Attestation validated: \(response.isValid)")
         
         let dateFormatter = ISO8601DateFormatter()
         guard let expiresAt = dateFormatter.date(from: response.expiresAt) else {
@@ -226,7 +226,8 @@ public class Grantiva {
         
         let customClaims = response.customClaims
         
-        print("[Grantiva] Attestation validation completed successfully!")
+        Logger.info("Attestation completed successfully")
+        heartbeatManager.start()
         return AttestationResult(
             isValid: response.isValid,
             token: response.token,
@@ -285,10 +286,11 @@ public class Grantiva {
     /// Clears stored attestation data for testing purposes
     /// This will force generation of a new key on next attestation
     public func clearStoredData() {
-        print("[Grantiva] Clearing stored attestation data...")
+        Logger.info("Clearing stored attestation data...")
         keyManager.clearStoredKeyId()
         tokenManager.clearTokens()
-        print("[Grantiva] Stored data cleared")
+        heartbeatManager.stop()
+        Logger.info("Stored data cleared")
     }
     
 }
