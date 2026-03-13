@@ -8,7 +8,7 @@ internal struct GrantivaConfiguration {
     let apiKey: String?
 
     static let `default` = GrantivaConfiguration(
-        baseURL: "https://grantiva.io",
+        baseURL: "https://api.grantiva.io",
         retryAttempts: 3,
         timeout: 30.0,
         apiKey: nil
