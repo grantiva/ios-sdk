@@ -91,7 +91,7 @@ struct ContentView: View {
                     } else {
                         Image(systemName: "shield.checkered")
                     }
-                    Text("Validate Attestation")
+                    Text("Attest Device")
                 }
                 .frame(maxWidth: .infinity)
                 .padding()
@@ -203,7 +203,7 @@ struct ContentView: View {
         
         Task {
             do {
-                let result = try await grantiva.validateAttestation()
+                let result = try await grantiva.attest()
                 await MainActor.run {
                     self.attestationResult = result
                     self.currentToken = result.token
