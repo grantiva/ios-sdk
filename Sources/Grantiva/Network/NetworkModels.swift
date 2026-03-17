@@ -44,3 +44,17 @@ internal struct DeviceIntelligenceResponse: Codable {
 internal struct ErrorResponse: Codable {
     let reason: String
 }
+
+/// Sent to `POST /api/v1/attestation/refresh` when the JWT has expired
+/// and the key has already been attested.
+internal struct AssertionRefreshRequest: Codable {
+    let keyId: String
+    let assertion: String      // base64-encoded CBOR assertion from DCAppAttestService
+    let clientDataHash: String // base64-encoded SHA256(challenge.utf8)
+    let challenge: String      // raw challenge string for server-side validation
+}
+
+internal struct AssertionRefreshResponse: Codable {
+    let token: String
+    let expiresAt: String
+}
