@@ -127,7 +127,8 @@ public class Grantiva {
             Logger.info("API key mode — returning synthetic attestation result")
             let deviceIntelligence = DeviceIntelligence(
                 deviceId: PlatformSupport.getDeviceIdentifier(),
-                riskScore: 0,
+                riskScore: nil,
+                riskCategory: .trusted,
                 deviceIntegrity: "api_key_mode",
                 jailbreakDetected: false,
                 attestationCount: 0,
@@ -147,15 +148,15 @@ public class Grantiva {
         if let storedToken = tokenManager.getStoredToken() {
             if !tokenManager.isTokenExpired(storedToken.expiresAt) {
                 Logger.debug("Using cached token")
-                let deviceIntelligence = DeviceIntelligence(
+                let deviceIntelligence = tokenManager.getStoredDeviceIntelligence() ?? DeviceIntelligence(
                     deviceId: PlatformSupport.getDeviceIdentifier(),
-                    riskScore: 0,
+                    riskScore: nil,
+                    riskCategory: .trusted,
                     deviceIntegrity: "cached",
                     jailbreakDetected: false,
                     attestationCount: 0,
                     lastAttestationDate: nil
                 )
-                
                 return AttestationResult(
                     isValid: true,
                     token: storedToken.token,
@@ -225,15 +226,18 @@ public class Grantiva {
         
         tokenManager.saveToken(response.token, expiresAt: expiresAt)
         keyManager.markAsAttested()
-        
+
+        let riskCategory = RiskCategory(rawValue: response.deviceIntelligence.riskCategory) ?? .trusted
         let deviceIntelligence = DeviceIntelligence(
             deviceId: response.deviceIntelligence.deviceId,
             riskScore: response.deviceIntelligence.riskScore,
+            riskCategory: riskCategory,
             deviceIntegrity: response.deviceIntelligence.deviceIntegrity,
             jailbreakDetected: response.deviceIntelligence.jailbreakDetected,
             attestationCount: response.deviceIntelligence.attestationCount,
             lastAttestationDate: response.deviceIntelligence.lastAttestationDate != nil ? dateFormatter.date(from: response.deviceIntelligence.lastAttestationDate!) : nil
         )
+        tokenManager.saveDeviceIntelligence(deviceIntelligence)
         
         let customClaims = response.customClaims
         
@@ -270,9 +274,10 @@ public class Grantiva {
         tokenManager.saveToken(response.token, expiresAt: expiresAt)
         Logger.info("Token refreshed via assertion")
 
-        let deviceIntelligence = DeviceIntelligence(
+        let deviceIntelligence = tokenManager.getStoredDeviceIntelligence() ?? DeviceIntelligence(
             deviceId: PlatformSupport.getDeviceIdentifier(),
-            riskScore: 0,
+            riskScore: nil,
+            riskCategory: .trusted,
             deviceIntegrity: "asserted",
             jailbreakDetected: false,
             attestationCount: 0,
@@ -299,7 +304,8 @@ public class Grantiva {
         
         let deviceIntelligence = DeviceIntelligence(
             deviceId: PlatformSupport.getDeviceIdentifier(),
-            riskScore: 0,
+            riskScore: nil,
+            riskCategory: .trusted,
             deviceIntegrity: "valid",
             jailbreakDetected: false,
             attestationCount: 0,

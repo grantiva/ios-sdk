@@ -32,7 +32,10 @@ internal struct AttestationResponse: Codable {
 
 internal struct DeviceIntelligenceResponse: Codable {
     let deviceId: String
-    let riskScore: Int
+    /// Numeric risk score. `nil` on free tier; present on Pro and above.
+    let riskScore: Int?
+    /// Risk category: "trusted" (0-20), "suspicious" (21-75), "blocked" (76-100). All tiers.
+    let riskCategory: String
     let deviceIntegrity: String
     let jailbreakDetected: Bool
     let attestationCount: Int
