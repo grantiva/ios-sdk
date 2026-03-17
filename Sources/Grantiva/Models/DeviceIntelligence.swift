@@ -10,7 +10,7 @@ public enum RiskCategory: String, Codable, CaseIterable {
     case blocked = "blocked"
 }
 
-public struct DeviceIntelligence {
+public struct DeviceIntelligence: Codable {
     public let deviceId: String
     /// Risk score from 0–100. `nil` when risk scoring is unavailable (simulator, Free tier, or API key mode).
     public let riskScore: Int?

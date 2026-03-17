@@ -167,7 +167,7 @@ public class Grantiva {
         if let storedToken = tokenManager.getStoredToken() {
             if !tokenManager.isTokenExpired(storedToken.expiresAt) {
                 Logger.debug("Using cached token")
-                let deviceIntelligence = DeviceIntelligence(
+                let deviceIntelligence = tokenManager.getStoredDeviceIntelligence() ?? DeviceIntelligence(
                     deviceId: PlatformSupport.getDeviceIdentifier(),
                     riskScore: nil,
                     riskCategory: .trusted,
@@ -176,7 +176,6 @@ public class Grantiva {
                     attestationCount: 0,
                     lastAttestationDate: nil
                 )
-                
                 return AttestationResult(
                     isValid: true,
                     token: storedToken.token,
@@ -246,7 +245,7 @@ public class Grantiva {
         
         tokenManager.saveToken(response.token, expiresAt: expiresAt)
         keyManager.markAsAttested()
-        
+
         let riskCategory = RiskCategory(rawValue: response.deviceIntelligence.riskCategory) ?? .trusted
         let deviceIntelligence = DeviceIntelligence(
             deviceId: response.deviceIntelligence.deviceId,
@@ -257,6 +256,7 @@ public class Grantiva {
             attestationCount: response.deviceIntelligence.attestationCount,
             lastAttestationDate: response.deviceIntelligence.lastAttestationDate != nil ? dateFormatter.date(from: response.deviceIntelligence.lastAttestationDate!) : nil
         )
+        tokenManager.saveDeviceIntelligence(deviceIntelligence)
         
         let customClaims = response.customClaims
         
@@ -294,9 +294,10 @@ public class Grantiva {
         tokenManager.saveToken(response.token, expiresAt: expiresAt)
         Logger.info("Token refreshed via assertion")
 
-        let deviceIntelligence = DeviceIntelligence(
+        let deviceIntelligence = tokenManager.getStoredDeviceIntelligence() ?? DeviceIntelligence(
             deviceId: PlatformSupport.getDeviceIdentifier(),
-            riskScore: 0,
+            riskScore: nil,
+            riskCategory: .trusted,
             deviceIntegrity: "asserted",
             jailbreakDetected: false,
             attestationCount: 0,
