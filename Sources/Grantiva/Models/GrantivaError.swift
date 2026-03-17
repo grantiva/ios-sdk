@@ -12,6 +12,7 @@ public enum GrantivaError: LocalizedError {
     case invalidResponse
     case rateLimited
     case feedbackNotAvailable
+    case deviceLimitExceeded
 
     public var errorDescription: String? {
         switch self {
@@ -37,6 +38,8 @@ public enum GrantivaError: LocalizedError {
             return "Too many requests. Please try again later"
         case .feedbackNotAvailable:
             return "Feedback service is not available for this tenant"
+        case .deviceLimitExceeded:
+            return "Monthly active device limit reached"
         }
     }
 
@@ -64,6 +67,8 @@ public enum GrantivaError: LocalizedError {
             return "You have exceeded the rate limit for this action"
         case .feedbackNotAvailable:
             return "Your current plan may not include feedback features"
+        case .deviceLimitExceeded:
+            return "You have used all your monthly active device quota. Upgrade your plan at grantiva.io/dashboard/billing"
         }
     }
 }

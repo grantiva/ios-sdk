@@ -12,6 +12,7 @@ struct ContentView: View {
     @State private var grantiva = Grantiva(teamId: "ABBM6U9RM5")
     @State private var attestationResult: AttestationResult?
     @State private var errorMessage: String?
+    @State private var currentError: Error?
     @State private var isLoading = false
     @State private var currentToken: String?
     @State private var isTokenValid = false
@@ -183,11 +184,19 @@ struct ContentView: View {
     }
     
     private func errorCard(error: String) -> some View {
-        HStack {
+        HStack(alignment: .top) {
             Image(systemName: "exclamationmark.triangle.fill")
                 .foregroundColor(.red)
-            Text(error)
-                .font(.callout)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(error)
+                    .font(.callout)
+                if let grantivaError = currentError as? GrantivaError,
+                   let reason = grantivaError.failureReason {
+                    Text(reason)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
@@ -212,13 +221,14 @@ struct ContentView: View {
                 }
             } catch {
                 await MainActor.run {
+                    self.currentError = error
                     self.errorMessage = error.localizedDescription
                     self.isLoading = false
                 }
             }
         }
     }
-    
+
     private func refreshToken() {
         isLoading = true
         errorMessage = nil
@@ -235,13 +245,14 @@ struct ContentView: View {
                 }
             } catch {
                 await MainActor.run {
+                    self.currentError = error
                     self.errorMessage = error.localizedDescription
                     self.isLoading = false
                 }
             }
         }
     }
-    
+
     private func checkCurrentToken() {
         currentToken = grantiva.getCurrentToken()
         isTokenValid = grantiva.isTokenValid()
@@ -253,6 +264,7 @@ struct ContentView: View {
         currentToken = nil
         isTokenValid = false
         errorMessage = nil
+        currentError = nil
     }
 }
 

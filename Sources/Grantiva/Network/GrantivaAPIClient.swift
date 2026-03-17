@@ -81,9 +81,12 @@ internal class GrantivaAPIClient {
             }
             
             guard httpResponse.statusCode == 200 else {
+                if httpResponse.statusCode == 402 {
+                    throw GrantivaError.deviceLimitExceeded
+                }
                 throw GrantivaError.validationFailed
             }
-            
+
             let attestationResponse = try JSONDecoder().decode(AttestationResponse.self, from: data)
             print("[Grantiva API] Successfully decoded attestation response")
             return attestationResponse
@@ -119,6 +122,9 @@ internal class GrantivaAPIClient {
             guard httpResponse.statusCode == 200 else {
                 let body = String(data: data, encoding: .utf8) ?? ""
                 print("[Grantiva API] Refresh failed (\(httpResponse.statusCode)): \(body)")
+                if httpResponse.statusCode == 402 {
+                    throw GrantivaError.deviceLimitExceeded
+                }
                 throw GrantivaError.validationFailed
             }
 
