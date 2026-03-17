@@ -5,6 +5,7 @@ import DeviceCheck
 internal class KeyManager {
     private let keychainService = "com.grantiva.sdk.keys"
     private let keyIdKey = "grantiva_attest_key_id"
+    private let attestedKey = "grantiva_attest_key_attested"
     
     func getOrCreateKeyId() async throws -> String {
         if let existingKeyId = getStoredKeyId() {
@@ -71,6 +72,37 @@ internal class KeyManager {
         return keyId
     }
     
+    /// Marks the current key as having been successfully attested on the server.
+    /// After this is set, token refresh will use the assertion path instead of re-attesting.
+    func markAsAttested() {
+        let data = "true".data(using: .utf8)!
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: keychainService,
+            kSecAttrAccount as String: attestedKey,
+            kSecValueData as String: data,
+            kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly
+        ]
+        SecItemDelete(query as CFDictionary)
+        let status = SecItemAdd(query as CFDictionary, nil)
+        if status != errSecSuccess {
+            print("[KeyManager] Failed to mark key as attested: \(status)")
+        }
+    }
+
+    /// Returns true if the current key has been successfully attested on the server.
+    func hasBeenAttested() -> Bool {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: keychainService,
+            kSecAttrAccount as String: attestedKey,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne
+        ]
+        var result: AnyObject?
+        return SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess
+    }
+
     func clearStoredKeyId() {
         print("[KeyManager] Clearing stored key ID...")
         let query: [String: Any] = [
@@ -87,5 +119,13 @@ internal class KeyManager {
         } else {
             print("[KeyManager] Error clearing key ID: \(status)")
         }
+
+        // Also clear the attested flag so the next key goes through full attestation
+        let attestedQuery: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: keychainService,
+            kSecAttrAccount as String: attestedKey
+        ]
+        SecItemDelete(attestedQuery as CFDictionary)
     }
 }

@@ -33,6 +33,30 @@ internal class AttestationManager {
     }
     
     
+    /// Generates an App Attest assertion for token refresh.
+    ///
+    /// Called when the JWT has expired and the key has already been attested.
+    /// Unlike `generateAttestation`, this can be called multiple times for the same key.
+    ///
+    /// - Parameters:
+    ///   - keyId: The key ID previously returned by `getOrCreateKeyId()`
+    ///   - challenge: The challenge string received from the server
+    /// - Returns: Raw assertion data (CBOR-encoded)
+    func generateAssertion(keyId: String, challenge: String) async throws -> Data {
+        guard DCAppAttestService.shared.isSupported else {
+            throw GrantivaError.attestationNotAvailable
+        }
+
+        let clientDataHash = createClientDataHash(challenge: challenge)
+
+        do {
+            let assertionObject = try await DCAppAttestService.shared.generateAssertion(keyId, clientDataHash: clientDataHash)
+            return assertionObject
+        } catch {
+            throw GrantivaError.validationFailed
+        }
+    }
+
     func checkDeviceSupport() -> Bool {
         return DCAppAttestService.shared.isSupported
     }

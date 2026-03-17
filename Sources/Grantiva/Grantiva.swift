@@ -169,6 +169,16 @@ public class Grantiva {
         let challengeResponse = try await apiClient.requestChallenge()
         Logger.debug("Received challenge: \(challengeResponse.challenge)")
 
+        // If the key has already been attested, use the assertion path for refresh.
+        // Re-calling attestKey with the same key is rejected by the backend's replay protection.
+        if keyManager.hasBeenAttested(), let existingKeyId = keyManager.getStoredKeyId() {
+            Logger.info("Key already attested — using assertion path for token refresh")
+            return try await refreshViaAssertion(
+                keyId: existingKeyId,
+                challenge: challengeResponse.challenge
+            )
+        }
+
         Logger.info("Getting or creating key ID...")
         let keyId = try await keyManager.getOrCreateKeyId()
         Logger.debug("Key ID: \(keyId)")
@@ -214,6 +224,7 @@ public class Grantiva {
         }
         
         tokenManager.saveToken(response.token, expiresAt: expiresAt)
+        keyManager.markAsAttested()
         
         let deviceIntelligence = DeviceIntelligence(
             deviceId: response.deviceIntelligence.deviceId,
@@ -237,6 +248,46 @@ public class Grantiva {
         )
     }
     
+    /// Refreshes the JWT using an App Attest assertion (for already-attested keys).
+    private func refreshViaAssertion(keyId: String, challenge: String) async throws -> AttestationResult {
+        let assertionData = try await attestationManager.generateAssertion(keyId: keyId, challenge: challenge)
+        let clientDataHashData = attestationManager.createClientDataHash(challenge: challenge)
+
+        let refreshRequest = AssertionRefreshRequest(
+            keyId: keyId,
+            assertion: assertionData.base64EncodedString(),
+            clientDataHash: clientDataHashData.base64EncodedString(),
+            challenge: challenge
+        )
+
+        let response = try await apiClient.refreshWithAssertion(refreshRequest)
+
+        let dateFormatter = ISO8601DateFormatter()
+        guard let expiresAt = dateFormatter.date(from: response.expiresAt) else {
+            throw GrantivaError.invalidResponse
+        }
+
+        tokenManager.saveToken(response.token, expiresAt: expiresAt)
+        Logger.info("Token refreshed via assertion")
+
+        let deviceIntelligence = DeviceIntelligence(
+            deviceId: PlatformSupport.getDeviceIdentifier(),
+            riskScore: 0,
+            deviceIntegrity: "asserted",
+            jailbreakDetected: false,
+            attestationCount: 0,
+            lastAttestationDate: nil
+        )
+
+        heartbeatManager.start()
+        return AttestationResult(
+            isValid: true,
+            token: response.token,
+            expiresAt: expiresAt,
+            deviceIntelligence: deviceIntelligence
+        )
+    }
+
     public func refreshToken() async throws -> AttestationResult? {
         guard let storedToken = tokenManager.getStoredToken() else {
             return nil
