@@ -25,10 +25,11 @@ public actor FlagService {
     private var cachedFlags: [String: FlagValue]?
     private var cacheExpiry: Date?
 
-    internal init(apiClient: FlagAPIClient, identity: IdentityProvider, environment: FlagEnvironment = .production) {
+    internal init(apiClient: FlagAPIClient, identity: IdentityProvider, environment: FlagEnvironment = .production, cacheTTL: TimeInterval = 300) {
         self.apiClient = apiClient
         self.identity = identity
         self.environment = environment
+        self.cacheTTL = cacheTTL
     }
 
     // MARK: - Public API

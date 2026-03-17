@@ -8,6 +8,7 @@ public class Grantiva {
     private let heartbeatManager: HeartbeatManager
     private let teamId: String
     private let configuration: GrantivaConfiguration
+    private let flagCacheTTL: TimeInterval
     internal let identity: IdentityProvider
 
     /// Lazy-initialized feedback service for feature requests and support tickets.
@@ -31,15 +32,18 @@ public class Grantiva {
     /// ```
     public private(set) lazy var flags: FlagService = {
         let flagClient = FlagAPIClient(configuration: configuration, teamId: teamId)
-        return FlagService(apiClient: flagClient, identity: identity)
+        return FlagService(apiClient: flagClient, identity: identity, cacheTTL: flagCacheTTL)
     }()
 
     /// - Parameters:
     ///   - teamId: Your Apple Team ID.
     ///   - apiKey: Optional API key for simulator / development use where App Attest is unavailable.
     ///            When provided, the SDK sends a Bearer token instead of Bundle ID + Team ID headers.
-    public init(teamId: String, apiKey: String? = nil) {
+    ///   - flagCacheTTL: Cache TTL in seconds for feature flags. Defaults to 300 (5 minutes).
+    ///                   Pass `0` to disable caching and always fetch from the server.
+    public init(teamId: String, apiKey: String? = nil, flagCacheTTL: TimeInterval = 300) {
         self.teamId = teamId
+        self.flagCacheTTL = flagCacheTTL
         let config = apiKey != nil
             ? GrantivaConfiguration(baseURL: GrantivaConfiguration.default.baseURL, apiKey: apiKey)
             : .default

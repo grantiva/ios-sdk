@@ -31,6 +31,23 @@ internal class TokenManager {
     func clearTokens() {
         deleteFromKeychain(key: tokenKey)
         deleteFromKeychain(key: expirationKey)
+        deleteFromKeychain(key: deviceIntelligenceKey)
+    }
+
+    // MARK: - Device Intelligence
+
+    private let deviceIntelligenceKey = "grantiva_device_intelligence"
+
+    func saveDeviceIntelligence(_ intelligence: DeviceIntelligence) {
+        guard let data = try? JSONEncoder().encode(intelligence),
+              let json = String(data: data, encoding: .utf8) else { return }
+        saveToKeychain(key: deviceIntelligenceKey, value: json)
+    }
+
+    func getStoredDeviceIntelligence() -> DeviceIntelligence? {
+        guard let json = getFromKeychain(key: deviceIntelligenceKey),
+              let data = json.data(using: .utf8) else { return nil }
+        return try? JSONDecoder().decode(DeviceIntelligence.self, from: data)
     }
     
     private func saveToKeychain(key: String, value: String) {
