@@ -22,18 +22,18 @@ internal class GrantivaAPIClient {
         request.httpMethod = "GET"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         applyAuth(to: &request)
-        
+
         do {
             let (data, response) = try await session.data(for: request)
-            
+
             guard let httpResponse = response as? HTTPURLResponse else {
                 throw GrantivaError.invalidResponse
             }
-            
+
             guard httpResponse.statusCode == 200 else {
-                throw GrantivaError.networkError(NSError(domain: "HTTPError", code: httpResponse.statusCode))
+                throw parseServerError(from: data, statusCode: httpResponse.statusCode)
             }
-            
+
             let challengeResponse = try JSONDecoder().decode(ChallengeResponse.self, from: data)
             return challengeResponse
         } catch {
@@ -70,18 +70,8 @@ internal class GrantivaAPIClient {
             
             print("[Grantiva API] Response status code: \(httpResponse.statusCode)")
             
-            if httpResponse.statusCode != 200 {
-                let responseBody = String(data: data, encoding: .utf8) ?? "Unable to decode response"
-                print("[Grantiva API] Error response body: \(responseBody)")
-                
-                // Try to decode error response
-                if let errorResponse = try? JSONDecoder().decode(ErrorResponse.self, from: data) {
-                    print("[Grantiva API] Server error: \(errorResponse.reason)")
-                }
-            }
-            
             guard httpResponse.statusCode == 200 else {
-                throw GrantivaError.validationFailed
+                throw parseServerError(from: data, statusCode: httpResponse.statusCode)
             }
             
             let attestationResponse = try JSONDecoder().decode(AttestationResponse.self, from: data)
@@ -97,6 +87,20 @@ internal class GrantivaAPIClient {
         }
     }
     
+    /// Parses a Vapor-format error body `{"error":true,"reason":"..."}` for 4xx responses.
+    /// 5xx responses never expose internals — falls back to `validationFailed`.
+    private func parseServerError(from data: Data, statusCode: Int) -> GrantivaError {
+        guard (400..<500).contains(statusCode) else {
+            return .validationFailed
+        }
+        if let errorResponse = try? JSONDecoder().decode(ErrorResponse.self, from: data),
+           !errorResponse.reason.isEmpty {
+            print("[Grantiva API] Server error (\(statusCode)): \(errorResponse.reason)")
+            return .serverError(reason: errorResponse.reason)
+        }
+        return .validationFailed
+    }
+
     private func applyAuth(to request: inout URLRequest) {
         if let apiKey = configuration.apiKey {
             request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
