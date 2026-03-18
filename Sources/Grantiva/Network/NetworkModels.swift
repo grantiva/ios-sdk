@@ -32,7 +32,7 @@ internal struct AttestationResponse: Codable {
 
 internal struct DeviceIntelligenceResponse: Codable {
     let deviceId: String
-    let riskScore: Int
+    let riskScore: Int?
     let deviceIntegrity: String
     let jailbreakDetected: Bool
     let attestationCount: Int

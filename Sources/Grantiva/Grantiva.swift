@@ -55,6 +55,9 @@ public class Grantiva {
             getToken: { [tokenManager] in tokenManager.getStoredToken()?.token },
             getDeviceId: { isAPIKey ? PlatformSupport.getDeviceIdentifier() : nil }
         )
+        #if targetEnvironment(simulator)
+        Logger.warning("[Grantiva] ⚠️ Running in simulator — App Attest unavailable. Using API key fallback. riskScore will be nil. Test on a real device to verify full attestation.")
+        #endif
     }
 
     /// Associate a user identity and context with this Grantiva instance.
@@ -119,6 +122,9 @@ public class Grantiva {
     
     public func validateAttestation() async throws -> AttestationResult {
         Logger.info("Starting attestation validation...")
+        #if targetEnvironment(simulator)
+        Logger.warning("[Grantiva] ⚠️ Running in simulator — App Attest unavailable. Using API key fallback. riskScore will be nil. Test on a real device to verify full attestation.")
+        #endif
 
         // When an API key is configured (e.g. simulator / dev builds), skip the
         // real App Attest flow entirely.  The API key already authenticates the
@@ -127,7 +133,7 @@ public class Grantiva {
             Logger.info("API key mode — returning synthetic attestation result")
             let deviceIntelligence = DeviceIntelligence(
                 deviceId: PlatformSupport.getDeviceIdentifier(),
-                riskScore: 0,
+                riskScore: nil,
                 deviceIntegrity: "api_key_mode",
                 jailbreakDetected: false,
                 attestationCount: 0,
@@ -149,7 +155,7 @@ public class Grantiva {
                 Logger.debug("Using cached token")
                 let deviceIntelligence = DeviceIntelligence(
                     deviceId: PlatformSupport.getDeviceIdentifier(),
-                    riskScore: 0,
+                    riskScore: nil,
                     deviceIntegrity: "cached",
                     jailbreakDetected: false,
                     attestationCount: 0,
@@ -248,7 +254,7 @@ public class Grantiva {
         
         let deviceIntelligence = DeviceIntelligence(
             deviceId: PlatformSupport.getDeviceIdentifier(),
-            riskScore: 0,
+            riskScore: nil,
             deviceIntegrity: "valid",
             jailbreakDetected: false,
             attestationCount: 0,
