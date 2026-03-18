@@ -12,6 +12,7 @@ public enum GrantivaError: LocalizedError {
     case invalidResponse
     case rateLimited
     case feedbackNotAvailable
+    case serverError(reason: String)
 
     public var errorDescription: String? {
         switch self {
@@ -37,6 +38,8 @@ public enum GrantivaError: LocalizedError {
             return "Too many requests. Please try again later"
         case .feedbackNotAvailable:
             return "Feedback service is not available for this tenant"
+        case .serverError(let reason):
+            return "Attestation failed: \(reason)"
         }
     }
 
@@ -64,6 +67,8 @@ public enum GrantivaError: LocalizedError {
             return "You have exceeded the rate limit for this action"
         case .feedbackNotAvailable:
             return "Your current plan may not include feedback features"
+        case .serverError(let reason):
+            return reason
         }
     }
 }
