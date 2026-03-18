@@ -64,6 +64,22 @@ if try await grantiva.flags.boolValue(for: "dark_mode") {
 > let grantiva = Grantiva(teamId: "YOUR_TEAM_ID", apiKey: "your-dev-api-key")
 > ```
 
+## Simulator vs Device
+
+App Attest is not available in the iOS Simulator. When running in the simulator:
+
+- `riskScore` will be `nil` — always guard against nil before displaying
+- No attestation record appears in the dashboard — this is expected
+- The JWT issued is a synthetic fallback token (not cryptographically attested)
+
+To test full attestation, run on a **real device** with your Team ID configured.
+
+For CI/CD or server-to-server use cases where a real device is unavailable, initialise with an API key:
+
+```swift
+let grantiva = Grantiva(teamId: "YOUR_TEAM_ID", apiKey: "your-api-key")
+```
+
 ## Attestation
 
 ```swift

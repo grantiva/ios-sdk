@@ -166,7 +166,7 @@ struct ContentView: View {
             
             VStack(alignment: .leading, spacing: 8) {
                 InfoRow(label: "Device ID", value: String(result.deviceIntelligence.deviceId.prefix(12)) + "...")
-                InfoRow(label: "Risk Score", value: "\(result.deviceIntelligence.riskScore)/100")
+                InfoRow(label: "Risk Score", value: result.deviceIntelligence.riskScore.map { "\($0)/100" } ?? "N/A (simulator or Free tier)")
                 InfoRow(label: "Device Integrity", value: result.deviceIntelligence.deviceIntegrity)
                 InfoRow(label: "Jailbreak Detected", value: result.deviceIntelligence.jailbreakDetected ? "Yes" : "No")
                 InfoRow(label: "Attestation Count", value: "\(result.deviceIntelligence.attestationCount)")
