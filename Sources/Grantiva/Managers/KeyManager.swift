@@ -23,7 +23,7 @@ internal class KeyManager {
             print("[KeyManager] Calling DCAppAttestService.generateKey()...")
             let keyId = try await DCAppAttestService.shared.generateKey()
             print("[KeyManager] Generated new key ID: \(keyId)")
-            saveKeyId(keyId)
+            try saveKeyId(keyId)
             return keyId
         } catch {
             print("[KeyManager] ERROR generating key: \(error)")
@@ -31,9 +31,9 @@ internal class KeyManager {
         }
     }
     
-    func saveKeyId(_ keyId: String) {
+    func saveKeyId(_ keyId: String) throws {
         let data = keyId.data(using: .utf8)!
-        
+
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: keychainService,
@@ -41,12 +41,13 @@ internal class KeyManager {
             kSecValueData as String: data,
             kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly
         ]
-        
+
         SecItemDelete(query as CFDictionary)
-        
+
         let status = SecItemAdd(query as CFDictionary, nil)
         if status != errSecSuccess {
-            print("Failed to save key ID to keychain: \(status)")
+            print("[KeyManager] ERROR: Failed to save key ID to Keychain (OSStatus \(status)) — key will be lost")
+            throw GrantivaError.keyGenerationFailed
         }
     }
     
