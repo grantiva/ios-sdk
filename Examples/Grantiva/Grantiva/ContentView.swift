@@ -9,7 +9,7 @@ import SwiftUI
 import Grantiva
 
 struct ContentView: View {
-    @State private var grantiva = Grantiva(teamId: "ABBM6U9RM5")
+    @State private var grantiva = Grantiva(teamId: "YOUR_TEAM_ID")
     @State private var attestationResult: AttestationResult?
     @State private var errorMessage: String?
     @State private var isLoading = false
