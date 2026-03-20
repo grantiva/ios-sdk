@@ -1,6 +1,6 @@
 import Foundation
 
-/// Provides access to remotely-configured feature flags.
+/// Provides access to remotely-configured feature flags with optional real-time SSE updates.
 ///
 /// Access via `grantiva.flags`:
 /// ```swift
@@ -8,6 +8,17 @@ import Foundation
 /// if flags["dark_mode"]?.boolValue == true { ... }
 /// let limit = try await grantiva.flags.value(for: "upload_limit")?.intValue ?? 10
 /// ```
+///
+/// ### Real-time Updates
+///
+/// Subscribe to live flag changes via ``setUpdateHandler(_:)``:
+/// ```swift
+/// await grantiva.flags.setUpdateHandler { flags in
+///     DispatchQueue.main.async { self.applyFlags(flags) }
+/// }
+/// ```
+/// Real-time streaming starts automatically after a successful attestation on Pro+ plans.
+/// If the SSE endpoint is unavailable the SDK falls back silently to polling.
 ///
 /// Flags are cached in-memory with a configurable TTL (default: 5 minutes).
 /// Call ``refresh()`` to force a fresh fetch.
@@ -24,6 +35,10 @@ public actor FlagService {
     // In-memory cache
     private var cachedFlags: [String: FlagValue]?
     private var cacheExpiry: Date?
+
+    // SSE streaming
+    private var sseClient: FlagSSEClient?
+    private var updateHandler: (@Sendable ([String: FlagValue]) -> Void)?
 
     internal init(apiClient: FlagAPIClient, identity: IdentityProvider, environment: FlagEnvironment = .production) {
         self.apiClient = apiClient
@@ -92,5 +107,68 @@ public actor FlagService {
     public func clearCache() {
         cachedFlags = nil
         cacheExpiry = nil
+    }
+
+    // MARK: - Real-time Update Handler
+
+    /// Register a handler that is invoked whenever the SSE stream delivers a flag update.
+    ///
+    /// The handler is called off the main thread. Dispatch to the main queue inside
+    /// the closure if you need to update UI:
+    /// ```swift
+    /// await grantiva.flags.setUpdateHandler { flags in
+    ///     DispatchQueue.main.async { self.applyFlags(flags) }
+    /// }
+    /// ```
+    ///
+    /// Pass `nil` to remove the handler.
+    public func setUpdateHandler(_ handler: (@Sendable ([String: FlagValue]) -> Void)?) {
+        updateHandler = handler
+    }
+
+    // MARK: - SSE Streaming (internal)
+
+    /// Start receiving real-time flag updates over SSE.
+    ///
+    /// Called by the `Grantiva` class after a successful attestation.
+    /// Calling this again while already streaming is a no-op.
+    internal func startStreaming(
+        configuration: GrantivaConfiguration,
+        teamId: String,
+        tokenManager: TokenManager
+    ) {
+        guard sseClient == nil else { return }
+
+        let client = FlagSSEClient(
+            configuration: configuration,
+            teamId: teamId,
+            environment: environment,
+            tokenManager: tokenManager
+        )
+        client.onFlagsUpdate = { [weak self] flags in
+            guard let self else { return }
+            Task { await self.handleSSEUpdate(flags) }
+        }
+        sseClient = client
+        client.start()
+        Logger.debug("[Grantiva] SSE flag streaming started")
+    }
+
+    /// Stop receiving real-time flag updates.
+    ///
+    /// Called on background transitions and when `clearStoredData()` is invoked.
+    internal func stopStreaming() {
+        sseClient?.stop()
+        sseClient = nil
+        Logger.debug("[Grantiva] SSE flag streaming stopped")
+    }
+
+    // MARK: - Private
+
+    internal func handleSSEUpdate(_ flags: [String: FlagValue]) {
+        // Update cache so getFlags() immediately reflects the live values
+        cachedFlags = flags
+        cacheExpiry = Date().addingTimeInterval(cacheTTL)
+        updateHandler?(flags)
     }
 }

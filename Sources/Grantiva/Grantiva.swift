@@ -1,4 +1,7 @@
 import Foundation
+#if os(iOS)
+import UIKit
+#endif
 
 public class Grantiva {
     private let apiClient: GrantivaAPIClient
@@ -9,6 +12,9 @@ public class Grantiva {
     private let teamId: String
     private let configuration: GrantivaConfiguration
     internal let identity: IdentityProvider
+
+    // Background/foreground lifecycle observers (iOS only)
+    private var lifecycleObservers: [NSObjectProtocol] = []
 
     /// Lazy-initialized feedback service for feature requests and support tickets.
     ///
@@ -58,6 +64,12 @@ public class Grantiva {
         #if targetEnvironment(simulator)
         Logger.warning("[Grantiva] ⚠️ Running in simulator — App Attest unavailable. Using API key fallback. riskScore will be nil. Test on a real device to verify full attestation.")
         #endif
+
+        registerLifecycleObservers()
+    }
+
+    deinit {
+        lifecycleObservers.forEach { NotificationCenter.default.removeObserver($0) }
     }
 
     /// Associate a user identity and context with this Grantiva instance.
@@ -140,6 +152,7 @@ public class Grantiva {
                 lastAttestationDate: nil
             )
             heartbeatManager.start()
+            await startFlagStreaming()
             return AttestationResult(
                 isValid: true,
                 token: "simulator-dev-token",
@@ -234,6 +247,7 @@ public class Grantiva {
         
         Logger.info("Attestation completed successfully")
         heartbeatManager.start()
+        await startFlagStreaming()
         return AttestationResult(
             isValid: response.isValid,
             token: response.token,
@@ -289,14 +303,57 @@ public class Grantiva {
         return !tokenManager.isTokenExpired(storedToken.expiresAt)
     }
     
-    /// Clears stored attestation data for testing purposes
-    /// This will force generation of a new key on next attestation
+    /// Clears stored attestation data for testing purposes.
+    ///
+    /// This stops all background services (heartbeats, SSE stream) and forces a fresh
+    /// attestation on the next `validateAttestation()` call.
     public func clearStoredData() {
         Logger.info("Clearing stored attestation data...")
         keyManager.clearStoredKeyId()
         tokenManager.clearTokens()
         heartbeatManager.stop()
+        let flagService = flags
+        Task { await flagService.stopStreaming() }
         Logger.info("Stored data cleared")
     }
-    
+
+    // MARK: - Flag Streaming Helpers
+
+    /// Start SSE flag streaming. The `getToken` closure returns the current stored JWT
+    /// so the SSE client always uses a fresh token on reconnect.
+    private func startFlagStreaming() async {
+        await flags.startStreaming(
+            configuration: configuration,
+            teamId: teamId,
+            tokenManager: tokenManager
+        )
+    }
+
+    // MARK: - App Lifecycle
+
+    /// Registers for app background/foreground notifications to pause and resume SSE streaming.
+    private func registerLifecycleObservers() {
+        #if os(iOS)
+        let background = NotificationCenter.default.addObserver(
+            forName: UIApplication.didEnterBackgroundNotification,
+            object: nil,
+            queue: nil
+        ) { [weak self] _ in
+            guard let self else { return }
+            let flagService = self.flags
+            Task { await flagService.stopStreaming() }
+        }
+
+        let foreground = NotificationCenter.default.addObserver(
+            forName: UIApplication.willEnterForegroundNotification,
+            object: nil,
+            queue: nil
+        ) { [weak self] _ in
+            guard let self else { return }
+            Task { await self.startFlagStreaming() }
+        }
+
+        lifecycleObservers = [background, foreground]
+        #endif
+    }
 }

@@ -1,7 +1,7 @@
 import Foundation
 import Security
 
-internal class TokenManager {
+internal final class TokenManager: @unchecked Sendable {
     private let keychainService = "com.grantiva.sdk.tokens"
     private let tokenKey = "grantiva_attestation_token"
     private let expirationKey = "grantiva_token_expiration"
