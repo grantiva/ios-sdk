@@ -69,6 +69,69 @@ final class GrantivaTests: XCTestCase {
         XCTAssertNotNil(error.errorDescription)
         XCTAssertNotNil(error.failureReason)
     }
+
+    // MARK: - limitExceeded error
+
+    func testLimitExceededErrorDescription() {
+        let error = GrantivaError.limitExceeded(limit: 1000, current: 1001)
+        XCTAssertEqual(
+            error.errorDescription,
+            "Monthly attestation limit reached (1001/1000 MAD). Upgrade at grantiva.io/upgrade."
+        )
+        XCTAssertNotNil(error.failureReason)
+    }
+
+    func testParseServerError_429_madLimitExceeded_returnsLimitExceeded() {
+        let client = GrantivaAPIClient(teamId: "TEAM123")
+        let body = """
+        {"error":"mad_limit_exceeded","limit":1000,"current":1001}
+        """.data(using: .utf8)!
+
+        let result = client.parseServerError(from: body, statusCode: 429)
+
+        if case .limitExceeded(let limit, let current) = result {
+            XCTAssertEqual(limit, 1000)
+            XCTAssertEqual(current, 1001)
+        } else {
+            XCTFail("Expected .limitExceeded, got \(result)")
+        }
+    }
+
+    func testParseServerError_429_unknownBody_returnsValidationFailed() {
+        let client = GrantivaAPIClient(teamId: "TEAM123")
+        let body = Data() // empty body
+
+        let result = client.parseServerError(from: body, statusCode: 429)
+
+        if case .validationFailed = result {
+            // correct — unknown 429 body falls back to validationFailed
+        } else {
+            XCTFail("Expected .validationFailed for unrecognised 429 body, got \(result)")
+        }
+    }
+
+    func testParseServerError_4xx_returnsServerError() {
+        let client = GrantivaAPIClient(teamId: "TEAM123")
+        let body = """
+        {"error":true,"reason":"No attestation found for key ID"}
+        """.data(using: .utf8)!
+
+        let result = client.parseServerError(from: body, statusCode: 404)
+
+        if case .serverError(let reason) = result {
+            XCTAssertEqual(reason, "No attestation found for key ID")
+        } else {
+            XCTFail("Expected .serverError, got \(result)")
+        }
+    }
+
+    func testParseServerError_5xx_returnsValidationFailed() {
+        let client = GrantivaAPIClient(teamId: "TEAM123")
+        let result = client.parseServerError(from: Data(), statusCode: 500)
+        if case .validationFailed = result { } else {
+            XCTFail("Expected .validationFailed for 5xx, got \(result)")
+        }
+    }
     
     func testDeviceIntelligenceExtraction() {
         let riskScore = 75

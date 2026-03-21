@@ -42,3 +42,9 @@ internal struct DeviceIntelligenceResponse: Codable {
 internal struct ErrorResponse: Codable {
     let reason: String
 }
+
+internal struct MADLimitResponse: Codable {
+    let error: String
+    let limit: Int
+    let current: Int
+}

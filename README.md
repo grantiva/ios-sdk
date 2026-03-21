@@ -244,6 +244,10 @@ do {
     // App Attest unavailable (simulator, old device)
 } catch GrantivaError.networkError(let underlying) {
     // Network issue
+} catch GrantivaError.limitExceeded(let limit, let current) {
+    // Tenant's Monthly Active Device limit reached
+    // error.localizedDescription = "Monthly attestation limit reached (current/limit MAD). Upgrade at grantiva.io/upgrade."
+    showUpgradePrompt()
 } catch GrantivaError.rateLimited {
     // Too many requests
 } catch GrantivaError.feedbackNotAvailable {
@@ -268,6 +272,10 @@ public enum GrantivaError: LocalizedError {
     case invalidResponse
     case rateLimited
     case feedbackNotAvailable
+    case serverError(reason: String)
+    /// Tenant's Monthly Active Device quota was exhausted.
+    /// `localizedDescription` includes the current/limit counts and an upgrade URL.
+    case limitExceeded(limit: Int, current: Int)
 }
 ```
 
