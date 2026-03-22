@@ -55,6 +55,17 @@ public class Grantiva {
             getToken: { [tokenManager] in tokenManager.getStoredToken()?.token },
             getDeviceId: { isAPIKey ? PlatformSupport.getDeviceIdentifier() : nil }
         )
+
+        #if targetEnvironment(simulator)
+        if apiKey == nil {
+            Logger.warning(
+                "Running on iOS Simulator — App Attest is unavailable. " +
+                "Call Grantiva(teamId:apiKey:) with a development API key to authenticate " +
+                "simulator builds. Get your key at: Dashboard → API Keys. " +
+                "See https://docs.grantiva.io/simulator for setup instructions."
+            )
+        }
+        #endif
     }
 
     /// Associate a user identity and context with this Grantiva instance.
@@ -142,6 +153,17 @@ public class Grantiva {
                 deviceIntelligence: deviceIntelligence
             )
         }
+
+        #if targetEnvironment(simulator)
+        // Simulator path without an API key — give a clear, actionable error instead
+        // of letting DeviceCompatibility throw a generic deviceNotSupported.
+        Logger.error(
+            "validateAttestation() called on iOS Simulator without an API key. " +
+            "Initialize with Grantiva(teamId:apiKey:) for simulator builds. " +
+            "See https://docs.grantiva.io/simulator"
+        )
+        throw GrantivaError.simulatorAPIKeyRequired
+        #endif
 
         try DeviceCompatibility.checkCompatibility()
         

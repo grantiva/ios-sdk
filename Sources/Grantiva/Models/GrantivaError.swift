@@ -12,6 +12,9 @@ public enum GrantivaError: LocalizedError {
     case invalidResponse
     case rateLimited
     case feedbackNotAvailable
+    /// Thrown when `validateAttestation()` is called in the iOS Simulator without
+    /// an API key. Initialize with `Grantiva(teamId:apiKey:)` for simulator builds.
+    case simulatorAPIKeyRequired
 
     public var errorDescription: String? {
         switch self {
@@ -37,6 +40,8 @@ public enum GrantivaError: LocalizedError {
             return "Too many requests. Please try again later"
         case .feedbackNotAvailable:
             return "Feedback service is not available for this tenant"
+        case .simulatorAPIKeyRequired:
+            return "App Attest is unavailable in the iOS Simulator — pass an API key to Grantiva(teamId:apiKey:) for simulator builds"
         }
     }
 
@@ -64,6 +69,8 @@ public enum GrantivaError: LocalizedError {
             return "You have exceeded the rate limit for this action"
         case .feedbackNotAvailable:
             return "Your current plan may not include feedback features"
+        case .simulatorAPIKeyRequired:
+            return "Create a development API key in the Grantiva dashboard (Dashboard → API Keys) and pass it to Grantiva(teamId:apiKey:). See https://docs.grantiva.io/simulator"
         }
     }
 }
