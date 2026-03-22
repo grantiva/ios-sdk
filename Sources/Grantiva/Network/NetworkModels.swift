@@ -33,6 +33,8 @@ internal struct AttestationResponse: Codable {
 internal struct DeviceIntelligenceResponse: Codable {
     let deviceId: String
     let riskScore: Int?
+    /// Raw category string from backend: "trusted" | "suspicious" | "blocked".
+    let riskCategory: String
     let deviceIntegrity: String
     let jailbreakDetected: Bool
     let attestationCount: Int

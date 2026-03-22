@@ -146,6 +146,7 @@ public class Grantiva {
             let deviceIntelligence = DeviceIntelligence(
                 deviceId: PlatformSupport.getDeviceIdentifier(),
                 riskScore: nil,
+                riskCategory: .trusted,
                 deviceIntegrity: "api_key_mode",
                 jailbreakDetected: false,
                 attestationCount: 0,
@@ -169,6 +170,7 @@ public class Grantiva {
                 let deviceIntelligence = DeviceIntelligence(
                     deviceId: PlatformSupport.getDeviceIdentifier(),
                     riskScore: nil,
+                    riskCategory: .trusted,
                     deviceIntegrity: "cached",
                     jailbreakDetected: false,
                     attestationCount: 0,
@@ -234,9 +236,11 @@ public class Grantiva {
         
         tokenManager.saveToken(response.token, expiresAt: expiresAt)
         
+        let riskCategory = RiskCategory(rawValue: response.deviceIntelligence.riskCategory) ?? .trusted
         let deviceIntelligence = DeviceIntelligence(
             deviceId: response.deviceIntelligence.deviceId,
             riskScore: response.deviceIntelligence.riskScore,
+            riskCategory: riskCategory,
             deviceIntegrity: response.deviceIntelligence.deviceIntegrity,
             jailbreakDetected: response.deviceIntelligence.jailbreakDetected,
             attestationCount: response.deviceIntelligence.attestationCount,
@@ -269,6 +273,7 @@ public class Grantiva {
         let deviceIntelligence = DeviceIntelligence(
             deviceId: PlatformSupport.getDeviceIdentifier(),
             riskScore: nil,
+            riskCategory: .trusted,
             deviceIntegrity: "valid",
             jailbreakDetected: false,
             attestationCount: 0,
