@@ -1,5 +1,25 @@
 import Foundation
 
+#if os(iOS)
+import UIKit
+#elseif os(macOS)
+import AppKit
+#endif
+
+/// Device context headers for flag targeting.
+internal struct DeviceContextHeaders {
+    let deviceModel: String?
+    let osVersion: String?
+    let appVersion: String?
+    let deviceId: String?
+    let riskScore: Int?
+    let locale: String?
+    let country: String?
+    let userId: String?
+    let attestationStatus: String?
+    let customProperties: [String: String]
+}
+
 /// Handles all feature flag API calls.
 internal final class FlagAPIClient: @unchecked Sendable {
     private let configuration: GrantivaConfiguration
@@ -21,13 +41,13 @@ internal final class FlagAPIClient: @unchecked Sendable {
     /// The backend returns `{ "flags": { "key": typedValue, ... } }` where values are
     /// natively typed via `JSONSerialization` (bools, ints, doubles, strings, objects).
     /// We parse them back into `[String: FlagValue]`.
-    func fetchFlags(environment: FlagEnvironment) async throws -> [String: FlagValue] {
+    func fetchFlags(environment: FlagEnvironment, deviceContext: DeviceContextHeaders? = nil) async throws -> [String: FlagValue] {
         var components = URLComponents(string: "\(configuration.baseURL)/api/v1/flags")!
         components.queryItems = [
             URLQueryItem(name: "environment", value: environment.rawValue)
         ]
 
-        let request = makeRequest(url: components.url!, method: "GET")
+        let request = makeRequest(url: components.url!, method: "GET", deviceContext: deviceContext)
         let data = try await perform(request)
 
         // The response is { "flags": { "key": typedValue } } — NOT Codable-friendly
@@ -75,7 +95,7 @@ internal final class FlagAPIClient: @unchecked Sendable {
 
     // MARK: - Request Helpers
 
-    private func makeRequest(url: URL, method: String) -> URLRequest {
+    private func makeRequest(url: URL, method: String, deviceContext: DeviceContextHeaders? = nil) -> URLRequest {
         var request = URLRequest(url: url)
         request.httpMethod = method
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -85,6 +105,42 @@ internal final class FlagAPIClient: @unchecked Sendable {
             request.setValue(getBundleId(), forHTTPHeaderField: "X-Bundle-ID")
             request.setValue(teamId, forHTTPHeaderField: "X-Team-ID")
         }
+
+        // Add device context headers for targeting
+        if let context = deviceContext {
+            if let deviceModel = context.deviceModel {
+                request.setValue(deviceModel, forHTTPHeaderField: "X-Device-Model")
+            }
+            if let osVersion = context.osVersion {
+                request.setValue(osVersion, forHTTPHeaderField: "X-OS-Version")
+            }
+            if let appVersion = context.appVersion {
+                request.setValue(appVersion, forHTTPHeaderField: "X-App-Version")
+            }
+            if let deviceId = context.deviceId {
+                request.setValue(deviceId, forHTTPHeaderField: "X-Device-ID")
+            }
+            if let riskScore = context.riskScore {
+                request.setValue("\(riskScore)", forHTTPHeaderField: "X-Risk-Score")
+            }
+            if let locale = context.locale {
+                request.setValue(locale, forHTTPHeaderField: "X-Locale")
+            }
+            if let country = context.country {
+                request.setValue(country, forHTTPHeaderField: "X-Country")
+            }
+            if let userId = context.userId {
+                request.setValue(userId, forHTTPHeaderField: "X-User-ID")
+            }
+            if let attestationStatus = context.attestationStatus {
+                request.setValue(attestationStatus, forHTTPHeaderField: "X-Attestation-Status")
+            }
+            // Add custom properties as X-Custom-* headers
+            for (key, value) in context.customProperties {
+                request.setValue(value, forHTTPHeaderField: "X-Custom-\(key)")
+            }
+        }
+
         return request
     }
 

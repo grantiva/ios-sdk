@@ -14,6 +14,8 @@ import Foundation
 public actor FlagService {
     private let apiClient: FlagAPIClient
     private let identity: IdentityProvider
+    private let getRiskScore: @Sendable () -> Int?
+    private let getAttestationStatus: @Sendable () -> String?
 
     /// Default environment used for flag evaluation.
     public var environment: FlagEnvironment
@@ -25,10 +27,18 @@ public actor FlagService {
     private var cachedFlags: [String: FlagValue]?
     private var cacheExpiry: Date?
 
-    internal init(apiClient: FlagAPIClient, identity: IdentityProvider, environment: FlagEnvironment = .production) {
+    internal init(
+        apiClient: FlagAPIClient,
+        identity: IdentityProvider,
+        environment: FlagEnvironment = .production,
+        getRiskScore: @escaping @Sendable () -> Int? = { nil },
+        getAttestationStatus: @escaping @Sendable () -> String? = { nil }
+    ) {
         self.apiClient = apiClient
         self.identity = identity
         self.environment = environment
+        self.getRiskScore = getRiskScore
+        self.getAttestationStatus = getAttestationStatus
     }
 
     // MARK: - Public API
@@ -43,10 +53,37 @@ public actor FlagService {
             return cached
         }
 
-        let flags = try await apiClient.fetchFlags(environment: environment)
+        let deviceContext = buildDeviceContext()
+        let flags = try await apiClient.fetchFlags(environment: environment, deviceContext: deviceContext)
         cachedFlags = flags
         cacheExpiry = Date().addingTimeInterval(cacheTTL)
         return flags
+    }
+
+    // MARK: - Device Context
+
+    /// Build device context headers for targeting rules.
+    private func buildDeviceContext() -> DeviceContextHeaders {
+        // Collect locale and country
+        let locale = Locale.current
+        let localeIdentifier = locale.identifier // e.g. "en_US"
+        let country = locale.region?.identifier // e.g. "US"
+
+        // Custom properties from user context
+        let customProps = identity.userContext?.properties ?? [:]
+
+        return DeviceContextHeaders(
+            deviceModel: PlatformSupport.getHardwareModel(),
+            osVersion: PlatformSupport.getOSVersion(),
+            appVersion: PlatformSupport.getAppVersion(),
+            deviceId: PlatformSupport.getDeviceIdentifier(),
+            riskScore: getRiskScore(),
+            locale: localeIdentifier,
+            country: country,
+            userId: identity.userId,
+            attestationStatus: getAttestationStatus(),
+            customProperties: customProps
+        )
     }
 
     /// Get a single flag value by key.

@@ -31,7 +31,34 @@ public class Grantiva {
     /// ```
     public private(set) lazy var flags: FlagService = {
         let flagClient = FlagAPIClient(configuration: configuration, teamId: teamId)
-        return FlagService(apiClient: flagClient, identity: identity)
+        return FlagService(
+            apiClient: flagClient,
+            identity: identity,
+            getRiskScore: { [weak self] in
+                guard let self = self else { return nil }
+                // If we're in API key mode (simulator), skip risk scoring
+                if self.configuration.apiKey != nil {
+                    return nil
+                }
+                // Use local risk score calculation
+                return DeviceIntelligenceExtractor.calculateLocalRiskScore()
+            },
+            getAttestationStatus: { [weak self] in
+                guard let self = self else { return nil }
+                // If we're in API key mode (simulator), return unattested
+                if self.configuration.apiKey != nil {
+                    return "unattested"
+                }
+                // Check if we have a valid token
+                guard let storedToken = self.tokenManager.getStoredToken() else {
+                    return "unattested"
+                }
+                if self.tokenManager.isTokenExpired(storedToken.expiresAt) {
+                    return "expired"
+                }
+                return "attested"
+            }
+        )
     }()
 
     /// - Parameters:
