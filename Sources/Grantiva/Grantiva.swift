@@ -415,7 +415,17 @@ public class Grantiva {
             queue: nil
         ) { [weak self] _ in
             guard let self else { return }
-            Task { await self.startFlagStreaming() }
+            let flagService = self.flags
+            let configuration = self.configuration
+            let teamId = self.teamId
+            let tokenManager = self.tokenManager
+            Task {
+                await flagService.startStreaming(
+                    configuration: configuration,
+                    teamId: teamId,
+                    tokenManager: tokenManager
+                )
+            }
         }
 
         lifecycleObservers = [background, foreground]
