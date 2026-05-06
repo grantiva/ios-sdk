@@ -5,10 +5,12 @@ internal final class FlagAPIClient: @unchecked Sendable {
     private let configuration: GrantivaConfiguration
     private let session: URLSession
     private let teamId: String
+    private let getToken: @Sendable () -> String?
 
-    init(configuration: GrantivaConfiguration, teamId: String) {
+    init(configuration: GrantivaConfiguration, teamId: String, getToken: @escaping @Sendable () -> String? = { nil }) {
         self.configuration = configuration
         self.teamId = teamId
+        self.getToken = getToken
 
         let sessionConfig = URLSessionConfiguration.default
         sessionConfig.timeoutIntervalForRequest = configuration.timeout
@@ -79,11 +81,14 @@ internal final class FlagAPIClient: @unchecked Sendable {
         var request = URLRequest(url: url)
         request.httpMethod = method
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        if let apiKey = configuration.apiKey {
+        // Always send Bundle ID + Team ID for app scoping. Auth precedence:
+        // attestation JWT > API key. The backend rejects requests with neither.
+        request.setValue(getBundleId(), forHTTPHeaderField: "X-Bundle-ID")
+        request.setValue(teamId, forHTTPHeaderField: "X-Team-ID")
+        if let token = getToken() {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        } else if let apiKey = configuration.apiKey {
             request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-        } else {
-            request.setValue(getBundleId(), forHTTPHeaderField: "X-Bundle-ID")
-            request.setValue(teamId, forHTTPHeaderField: "X-Team-ID")
         }
         return request
     }

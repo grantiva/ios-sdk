@@ -24,7 +24,11 @@ public class Grantiva {
     /// let ticket = try await grantiva.feedback.submitTicket(subject: "Help", body: "Details...")
     /// ```
     public private(set) lazy var feedback: FeedbackService = {
-        let feedbackClient = FeedbackAPIClient(configuration: configuration, teamId: teamId)
+        let feedbackClient = FeedbackAPIClient(
+            configuration: configuration,
+            teamId: teamId,
+            getToken: { [tokenManager] in tokenManager.getStoredToken()?.token }
+        )
         return FeedbackService(apiClient: feedbackClient, identity: identity)
     }()
 
@@ -36,7 +40,11 @@ public class Grantiva {
     /// let limit = try await grantiva.flags.intValue(for: "upload_limit", default: 10)
     /// ```
     public private(set) lazy var flags: FlagService = {
-        let flagClient = FlagAPIClient(configuration: configuration, teamId: teamId)
+        let flagClient = FlagAPIClient(
+            configuration: configuration,
+            teamId: teamId,
+            getToken: { [tokenManager] in tokenManager.getStoredToken()?.token }
+        )
         return FlagService(apiClient: flagClient, identity: identity)
     }()
 

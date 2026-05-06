@@ -135,13 +135,14 @@ internal final class FlagSSEClient: @unchecked Sendable {
     // MARK: - Auth
 
     private func applyAuth(to request: inout URLRequest) {
+        // Always include Bundle ID + Team ID for app scoping. Auth precedence:
+        // attestation JWT > API key. The backend rejects requests with neither.
+        request.setValue(Bundle.main.bundleIdentifier ?? "", forHTTPHeaderField: "X-Bundle-ID")
+        request.setValue(teamId, forHTTPHeaderField: "X-Team-ID")
         if let token = tokenManager.getStoredToken()?.token {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         } else if let apiKey = configuration.apiKey {
             request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-        } else {
-            request.setValue(Bundle.main.bundleIdentifier ?? "", forHTTPHeaderField: "X-Bundle-ID")
-            request.setValue(teamId, forHTTPHeaderField: "X-Team-ID")
         }
     }
 
