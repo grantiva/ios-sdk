@@ -5,6 +5,7 @@ internal final class TokenManager: @unchecked Sendable {
     private let keychainService = "com.grantiva.sdk.tokens"
     private let tokenKey = "grantiva_attestation_token"
     private let expirationKey = "grantiva_token_expiration"
+    private let deviceIntelligenceKey = "grantiva_device_intelligence"
     
     func saveToken(_ token: String, expiresAt: Date) {
         saveToKeychain(key: tokenKey, value: token)
@@ -31,6 +32,22 @@ internal final class TokenManager: @unchecked Sendable {
     func clearTokens() {
         deleteFromKeychain(key: tokenKey)
         deleteFromKeychain(key: expirationKey)
+        deleteFromKeychain(key: deviceIntelligenceKey)
+    }
+
+    func saveDeviceIntelligence(_ deviceIntelligence: DeviceIntelligence) {
+        guard let data = try? JSONEncoder().encode(deviceIntelligence),
+              let json = String(data: data, encoding: .utf8) else { return }
+        saveToKeychain(key: deviceIntelligenceKey, value: json)
+    }
+
+    func getStoredDeviceIntelligence() -> DeviceIntelligence? {
+        guard let json = getFromKeychain(key: deviceIntelligenceKey),
+              let data = json.data(using: .utf8),
+              let intelligence = try? JSONDecoder().decode(DeviceIntelligence.self, from: data) else {
+            return nil
+        }
+        return intelligence
     }
     
     private func saveToKeychain(key: String, value: String) {
