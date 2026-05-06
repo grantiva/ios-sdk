@@ -27,14 +27,14 @@ internal final class HeartbeatAPIClient: @unchecked Sendable {
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
-        if let apiKey = configuration.apiKey {
+        // Always send Bundle ID + Team ID for app scoping. Auth precedence:
+        // attestation JWT > API key. The backend rejects requests with neither.
+        request.setValue(getBundleId(), forHTTPHeaderField: "X-Bundle-ID")
+        request.setValue(teamId, forHTTPHeaderField: "X-Team-ID")
+        if let token {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        } else if let apiKey = configuration.apiKey {
             request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-        } else {
-            request.setValue(getBundleId(), forHTTPHeaderField: "X-Bundle-ID")
-            request.setValue(teamId, forHTTPHeaderField: "X-Team-ID")
-            if let token {
-                request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-            }
         }
 
         var body: [String: String] = [:]
