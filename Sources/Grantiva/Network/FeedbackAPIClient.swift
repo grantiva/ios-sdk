@@ -172,11 +172,13 @@ internal final class FeedbackAPIClient: @unchecked Sendable {
         var request = URLRequest(url: url)
         request.httpMethod = method
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        // Always send Bundle ID + Team ID so the backend can scope feedback to a
+        // specific app. The optional API key authorizes simulator/dev requests
+        // where App Attest is unavailable.
+        request.setValue(getBundleId(), forHTTPHeaderField: "X-Bundle-ID")
+        request.setValue(teamId, forHTTPHeaderField: "X-Team-ID")
         if let apiKey = configuration.apiKey {
             request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-        } else {
-            request.setValue(getBundleId(), forHTTPHeaderField: "X-Bundle-ID")
-            request.setValue(teamId, forHTTPHeaderField: "X-Team-ID")
         }
         return request
     }
