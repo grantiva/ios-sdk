@@ -201,31 +201,51 @@ public class Grantiva {
         // Re-calling attestKey with the same key is rejected by the backend's replay protection.
         if keyManager.hasBeenAttested(), let existingKeyId = keyManager.getStoredKeyId() {
             Logger.info("Key already attested — using assertion path for token refresh")
-            return try await refreshViaAssertion(
-                keyId: existingKeyId,
-                challenge: challengeResponse.challenge
-            )
+            do {
+                return try await refreshViaAssertion(
+                    keyId: existingKeyId,
+                    challenge: challengeResponse.challenge
+                )
+            } catch GrantivaError.reattestRequired {
+                // Server has invalidated the stored attestation row (rpIdHash drift or
+                // signature mismatch). Drop local key state and fall through to the full
+                // attest path below. Request a fresh challenge — the previous one was
+                // consumed by the failed refresh.
+                Logger.warning("Server reported reattest_required — clearing local key state and re-attesting")
+                keyManager.clearAttestedFlag()
+                tokenManager.clearTokens()
+                let freshChallenge = try await apiClient.requestChallenge()
+                return try await performFullAttestation(challenge: freshChallenge.challenge)
+            }
         }
 
+        return try await performFullAttestation(challenge: challengeResponse.challenge)
+    }
+
+    /// Runs the App Attest generateKey → attest → /validate flow against the supplied
+    /// (single-use) challenge. Extracted so the assertion-refresh self-heal path can
+    /// re-enter the attest flow with a fresh challenge after the server reports
+    /// `reattestRequired`.
+    private func performFullAttestation(challenge: String) async throws -> AttestationResult {
         Logger.info("Getting or creating key ID...")
         let keyId = try await keyManager.getOrCreateKeyId()
         Logger.debug("Key ID: \(keyId)")
 
         Logger.info("Generating attestation object...")
-        let attestationObject = try await attestationManager.generateAttestation(keyId: keyId, challenge: challengeResponse.challenge)
+        let attestationObject = try await attestationManager.generateAttestation(keyId: keyId, challenge: challenge)
         Logger.debug("Attestation object size: \(attestationObject.count) bytes")
 
-        let clientDataHashData = attestationManager.createClientDataHash(challenge: challengeResponse.challenge)
+        let clientDataHashData = attestationManager.createClientDataHash(challenge: challenge)
         let clientDataHash = clientDataHashData.base64EncodedString()
         Logger.debug("Client data hash: \(clientDataHash)")
-        
+
         let attestationRequest = AttestationRequest(
             bundleId: Bundle.main.bundleIdentifier ?? "",
             teamId: teamId,
             keyId: keyId,
             attestationObject: attestationObject.base64EncodedString(),
             clientDataHash: clientDataHash,
-            challenge: challengeResponse.challenge,
+            challenge: challenge,
             deviceModel: PlatformSupport.getHardwareModel(),
             osVersion: PlatformSupport.getOSVersion(),
             appVersion: PlatformSupport.getAppVersion(),
@@ -240,17 +260,17 @@ public class Grantiva {
                 #endif
             }()
         )
-        
+
         Logger.debug("Sending attestation for bundle: \(attestationRequest.bundleId), team: \(attestationRequest.teamId)")
 
         let response = try await apiClient.validateAttestation(attestationRequest)
         Logger.info("Attestation validated: \(response.isValid)")
-        
+
         let dateFormatter = ISO8601DateFormatter()
         guard let expiresAt = dateFormatter.date(from: response.expiresAt) else {
             throw GrantivaError.invalidResponse
         }
-        
+
         tokenManager.saveToken(response.token, expiresAt: expiresAt)
         keyManager.markAsAttested()
 
@@ -265,9 +285,9 @@ public class Grantiva {
             lastAttestationDate: response.deviceIntelligence.lastAttestationDate != nil ? dateFormatter.date(from: response.deviceIntelligence.lastAttestationDate!) : nil
         )
         tokenManager.saveDeviceIntelligence(deviceIntelligence)
-        
+
         let customClaims = response.customClaims
-        
+
         Logger.info("Attestation completed successfully")
         heartbeatManager.start()
         await startFlagStreaming()
