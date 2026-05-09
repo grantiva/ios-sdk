@@ -5,6 +5,10 @@ public enum GrantivaError: LocalizedError {
     case attestationNotAvailable
     case networkError(Error)
     case validationFailed
+    /// Server reported the device's stored attestation is no longer cryptographically
+    /// valid (rpIdHash drift or signature mismatch). The SDK responds by clearing the
+    /// cached keyId/attested flag and rerunning the full attestation flow once.
+    case reattestRequired
     case tokenExpired
     case configurationError
     case keyGenerationFailed
@@ -24,6 +28,8 @@ public enum GrantivaError: LocalizedError {
             return "Network error occurred: \(error.localizedDescription)"
         case .validationFailed:
             return "Attestation validation failed"
+        case .reattestRequired:
+            return "Stored device key state diverged from server — re-attestation required"
         case .tokenExpired:
             return "Authentication token has expired"
         case .configurationError:
@@ -53,6 +59,8 @@ public enum GrantivaError: LocalizedError {
             return "Check your internet connection and try again"
         case .validationFailed:
             return "The device attestation could not be verified by the server"
+        case .reattestRequired:
+            return "Local key/keychain state is out of sync with the server's stored attestation"
         case .tokenExpired:
             return "The authentication token needs to be refreshed"
         case .configurationError:

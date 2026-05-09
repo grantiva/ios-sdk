@@ -104,6 +104,22 @@ internal class KeyManager {
         return SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess
     }
 
+    /// Clears only the "attested" flag, keeping the keyId in keychain.
+    ///
+    /// Used by the assertion-refresh self-heal path: when the server reports
+    /// `reattest_required`, we want the next `validateAttestation()` call to take
+    /// the full attest path (because `hasBeenAttested()` is now false), but we keep
+    /// the same App Attest keyId so the device's Secure Enclave key continues to be
+    /// reused — App Attest itself doesn't allow regenerating a key for the same app.
+    func clearAttestedFlag() {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: keychainService,
+            kSecAttrAccount as String: attestedKey
+        ]
+        SecItemDelete(query as CFDictionary)
+    }
+
     func clearStoredKeyId() {
         print("[KeyManager] Clearing stored key ID...")
         let query: [String: Any] = [

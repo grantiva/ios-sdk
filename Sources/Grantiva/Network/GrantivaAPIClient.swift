@@ -123,6 +123,11 @@ internal class GrantivaAPIClient {
             guard httpResponse.statusCode == 200 else {
                 let body = String(data: data, encoding: .utf8) ?? ""
                 print("[Grantiva API] Refresh failed (\(httpResponse.statusCode)): \(body)")
+                // 409 = backend has invalidated the stored attestation row and is asking
+                // the SDK to re-attest. Surface a distinct error so the caller can self-heal.
+                if httpResponse.statusCode == 409 {
+                    throw GrantivaError.reattestRequired
+                }
                 throw GrantivaError.validationFailed
             }
 
