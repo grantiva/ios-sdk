@@ -242,9 +242,10 @@ public class Grantiva {
                 // Server has invalidated the stored attestation row (rpIdHash drift or
                 // signature mismatch). Drop local key state and fall through to the full
                 // attest path below. Request a fresh challenge — the previous one was
-                // consumed by the failed refresh.
+                // consumed by the failed refresh. Also clear the keyId so a fresh one
+                // is generated; App Attest does not permit re-attesting the same key.
                 Logger.warning("Server reported reattest_required — clearing local key state and re-attesting")
-                keyManager.clearAttestedFlag()
+                keyManager.clearStoredKeyId()
                 tokenManager.clearTokens()
                 let freshChallenge = try await apiClient.requestChallenge()
                 return try await performFullAttestation(challenge: freshChallenge.challenge)
@@ -258,7 +259,24 @@ public class Grantiva {
     /// (single-use) challenge. Extracted so the assertion-refresh self-heal path can
     /// re-enter the attest flow with a fresh challenge after the server reports
     /// `reattestRequired`.
+    ///
+    /// If Apple rejects `attestKey` with `keyAlreadyAttested` (DCError 2), drop the
+    /// stored keyId and retry once with a fresh one. This handles the case where
+    /// the keyId persisted across an event that cleared the "attested" flag (e.g.,
+    /// a partial keychain wipe, or earlier SDK versions that only cleared the flag).
+    /// Limited to one retry to prevent infinite loops on persistent Apple errors.
     private func performFullAttestation(challenge: String) async throws -> AttestationResult {
+        do {
+            return try await attemptFullAttestation(challenge: challenge)
+        } catch GrantivaError.keyAlreadyAttested {
+            Logger.warning("Apple reported keyAlreadyAttested — clearing stored keyId and retrying with a fresh key")
+            keyManager.clearStoredKeyId()
+            let freshChallenge = try await apiClient.requestChallenge()
+            return try await attemptFullAttestation(challenge: freshChallenge.challenge)
+        }
+    }
+
+    private func attemptFullAttestation(challenge: String) async throws -> AttestationResult {
         Logger.info("Getting or creating key ID...")
         let keyId = try await keyManager.getOrCreateKeyId()
         Logger.debug("Key ID: \(keyId)")
