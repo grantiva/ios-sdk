@@ -21,12 +21,14 @@ internal class AttestationManager {
             let attestationObject = try await DCAppAttestService.shared.attestKey(keyId, clientDataHash: clientDataHash)
             return attestationObject
         } catch {
-            // Surface the underlying DCError. DCErrorDomain codes map to:
-            //   2 = invalidInput, 3 = invalidKey, 4 = serverUnavailable,
-            //   5 = featureUnsupported. Logging this is the only way to
-            //   diagnose attestation failures without a debugger attached.
+            // DCErrorDomain codes map to:
+            //   2 = invalidInput (in practice: keyId already attested, can't re-attest)
+            //   3 = invalidKey, 4 = serverUnavailable, 5 = featureUnsupported.
             let nsError = error as NSError
             Logger.error("DCAppAttestService.attestKey failed: domain=\(nsError.domain) code=\(nsError.code) description=\(nsError.localizedDescription)")
+            if nsError.domain == "com.apple.devicecheck.error" && nsError.code == 2 {
+                throw GrantivaError.keyAlreadyAttested
+            }
             throw GrantivaError.validationFailed
         }
     }

@@ -20,6 +20,12 @@ public enum GrantivaError: LocalizedError {
     /// Thrown when `validateAttestation()` is called in the iOS Simulator without
     /// an API key. Initialize with `Grantiva(teamId:apiKey:)` for simulator builds.
     case simulatorAPIKeyRequired
+    /// Apple rejected `DCAppAttestService.attestKey` with `DCError.invalidInput`
+    /// (code 2). This typically means the keyId has already been attested in a
+    /// prior session and cannot be re-attested — App Attest permits one attestation
+    /// per key over its lifetime. The SDK self-heals by clearing the stored keyId
+    /// and generating a fresh one once before bubbling this up.
+    case keyAlreadyAttested
 
     public var errorDescription: String? {
         switch self {
@@ -51,6 +57,8 @@ public enum GrantivaError: LocalizedError {
             return "Attestation failed: \(reason)"
         case .simulatorAPIKeyRequired:
             return "App Attest is unavailable in the iOS Simulator — pass an API key to Grantiva(teamId:apiKey:) for simulator builds"
+        case .keyAlreadyAttested:
+            return "Stored device key was already attested in a prior session — App Attest does not permit re-attesting the same key"
         }
     }
 
@@ -84,6 +92,8 @@ public enum GrantivaError: LocalizedError {
             return reason
         case .simulatorAPIKeyRequired:
             return "Create a development API key in the Grantiva dashboard (Dashboard → API Keys) and pass it to Grantiva(teamId:apiKey:). See https://docs.grantiva.io/simulator"
+        case .keyAlreadyAttested:
+            return "The keyId persisted from a previous install or session. The SDK clears it and generates a fresh one automatically; this error only surfaces if the second attestation attempt also fails."
         }
     }
 }
