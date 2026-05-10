@@ -21,10 +21,16 @@ internal class AttestationManager {
             let attestationObject = try await DCAppAttestService.shared.attestKey(keyId, clientDataHash: clientDataHash)
             return attestationObject
         } catch {
+            // Surface the underlying DCError. DCErrorDomain codes map to:
+            //   2 = invalidInput, 3 = invalidKey, 4 = serverUnavailable,
+            //   5 = featureUnsupported. Logging this is the only way to
+            //   diagnose attestation failures without a debugger attached.
+            let nsError = error as NSError
+            Logger.error("DCAppAttestService.attestKey failed: domain=\(nsError.domain) code=\(nsError.code) description=\(nsError.localizedDescription)")
             throw GrantivaError.validationFailed
         }
     }
-    
+
     func createClientDataHash(challenge: String) -> Data {
         // Apple expects just the challenge data hashed, not combined with bundle/team ID
         let challengeData = Data(challenge.utf8)
@@ -53,6 +59,8 @@ internal class AttestationManager {
             let assertionObject = try await DCAppAttestService.shared.generateAssertion(keyId, clientDataHash: clientDataHash)
             return assertionObject
         } catch {
+            let nsError = error as NSError
+            Logger.error("DCAppAttestService.generateAssertion failed: domain=\(nsError.domain) code=\(nsError.code) description=\(nsError.localizedDescription)")
             throw GrantivaError.validationFailed
         }
     }
