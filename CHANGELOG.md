@@ -1,5 +1,17 @@
 # Changelog
 
+## 2.0.2 — 2026-05-10
+
+### Bug Fixes
+
+- `AttestationManager` now logs the underlying `DCErrorDomain` code + description before rethrowing `GrantivaError.validationFailed` (#19). Previously, all App Attest failures collapsed to a generic error with no diagnostic info, making real-device attestation failures impossible to triage from the app console.
+
+### Developer Experience
+
+- New `GrantivaError.simulatorAPIKeyRequired` case (#18). `validateAttestation()` on the iOS Simulator without an `apiKey` now throws this targeted error immediately and points at `Grantiva(teamId:apiKey:)` + the simulator setup docs, instead of falling through to a generic `deviceNotSupported`. The previous misleading "Using API key fallback" warning that appeared even when no API key was set has been removed.
+
+---
+
 ## 2.0.1 — 2026-05-09
 
 ### Bug Fixes
