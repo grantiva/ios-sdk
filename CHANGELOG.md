@@ -1,5 +1,18 @@
 # Changelog
 
+## 2.0.4 — 2026-05-10
+
+### Features
+
+- `validateAttestation()` now sends a stable hashed device fingerprint with every attestation (#21). The backend uses this as a secondary key for MAD lookup so the same physical device counts once toward billing even when its App Attest key is regenerated mid-month by the 2.0.3 self-heal path. Requires backend with [grantiva/super-duper-disco#174](https://github.com/grantiva/super-duper-disco/pull/174).
+- New `PlatformSupport.getDeviceFingerprint()` helper (internal): hex SHA256 of `identifierForVendor` (iOS) / `IOPlatformSerialNumber` (macOS). The raw identifier never leaves the device — only the hash, which is opaque to the server.
+
+### Privacy note
+
+We hash the device identifier client-side and only send the digest. The server cannot recover the raw IDFV from the hash, so the on-wire value is a stable opaque token usable only for matching attestations from the same device.
+
+---
+
 ## 2.0.3 — 2026-05-10
 
 ### Bug Fixes
