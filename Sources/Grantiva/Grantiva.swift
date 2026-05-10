@@ -308,7 +308,8 @@ public class Grantiva {
                 #else
                 return nil
                 #endif
-            }()
+            }(),
+            deviceFingerprint: PlatformSupport.getDeviceFingerprint()
         )
 
         Logger.debug("Sending attestation for bundle: \(attestationRequest.bundleId), team: \(attestationRequest.teamId)")

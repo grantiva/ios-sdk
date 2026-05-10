@@ -20,6 +20,13 @@ internal struct AttestationRequest: Codable {
     let appVersion: String?
     let appBuildNumber: String?
     let platform: String?
+
+    /// Stable hardware-derived fingerprint (hex SHA256 of identifierForVendor on
+    /// iOS). The backend uses this as a secondary key in MAD lookup so the same
+    /// physical device counts once even when its App Attest key is regenerated
+    /// mid-billing-period by the self-heal path. The raw identifier is never
+    /// transmitted — only its hash.
+    let deviceFingerprint: String?
 }
 
 internal struct AttestationResponse: Codable {

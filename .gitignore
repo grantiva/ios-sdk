@@ -88,4 +88,4 @@ CLAUDE.md
 
 # Other
 *.log
-*.tmp
+*.tmp.claude/
