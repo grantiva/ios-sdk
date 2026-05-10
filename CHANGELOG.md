@@ -1,5 +1,18 @@
 # Changelog
 
+## 2.0.3 — 2026-05-10
+
+### Bug Fixes
+
+- `validateAttestation()` now self-heals when Apple rejects `attestKey()` with `DCError.invalidInput` (code 2) — the error App Attest returns when a keyId has already been attested in a prior session and cannot be re-attested (#20). The SDK clears the stored keyId, generates a fresh one, requests a new challenge, and retries once before surfacing failure. Closes a hole in the 2.0.1 `reattestRequired` self-heal, which cleared the `attested` flag but kept the keyId — sending the next attestation straight into this error.
+- New `GrantivaError.keyAlreadyAttested` case (informational — handled internally by the retry path; surfaces only if the second attestation also fails).
+
+### Known Issue
+
+- Self-heal cycles count as a new MAD on the backend because `DeviceProfile` is keyed by `(organization_id, keyId)`. Same physical device with a regenerated keyId currently counts twice in the month the heal occurs. Follow-up planned to dedupe via device fingerprint in `getOrCreateDeviceProfile`.
+
+---
+
 ## 2.0.2 — 2026-05-10
 
 ### Bug Fixes
