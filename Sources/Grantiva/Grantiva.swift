@@ -70,7 +70,21 @@ public class Grantiva {
             getDeviceId: { isAPIKey ? PlatformSupport.getDeviceIdentifier() : nil }
         )
         #if targetEnvironment(simulator)
-        Logger.warning("[Grantiva] ⚠️ Running in simulator — App Attest unavailable. Using API key fallback. riskScore will be nil. Test on a real device to verify full attestation.")
+        if apiKey == nil {
+            // No-apiKey simulator builds will throw `simulatorAPIKeyRequired` from
+            // validateAttestation(); warn at init so the developer sees the actionable
+            // setup link before they hit the runtime error.
+            Logger.warning(
+                "Running on iOS Simulator — App Attest is unavailable. " +
+                "Call Grantiva(teamId:apiKey:) with a development API key to authenticate " +
+                "simulator builds. Get your key at: Dashboard → API Keys. " +
+                "See https://docs.grantiva.io/simulator for setup instructions."
+            )
+        } else {
+            // apiKey-mode simulator builds work, but `riskScore` will be nil because
+            // there is no attestation. Worth saying so once at init.
+            Logger.warning("[Grantiva] Running in simulator with API key fallback. riskScore will be nil. Test on a real device for full attestation.")
+        }
         #endif
 
         registerLifecycleObservers()
@@ -142,8 +156,15 @@ public class Grantiva {
     
     public func validateAttestation() async throws -> AttestationResult {
         Logger.info("Starting attestation validation...")
+
         #if targetEnvironment(simulator)
-        Logger.warning("[Grantiva] ⚠️ Running in simulator — App Attest unavailable. Using API key fallback. riskScore will be nil. Test on a real device to verify full attestation.")
+        // App Attest is unavailable in the simulator. Without an API key fallback,
+        // throw a targeted error rather than letting DeviceCompatibility surface a
+        // generic `deviceNotSupported`. Init has already logged the setup link.
+        guard configuration.apiKey != nil else {
+            Logger.error("validateAttestation() called on iOS Simulator without an API key. Initialize with Grantiva(teamId:apiKey:) for simulator builds. See https://docs.grantiva.io/simulator")
+            throw GrantivaError.simulatorAPIKeyRequired
+        }
         #endif
 
         // When an API key is configured (e.g. simulator / dev builds), skip the
@@ -169,6 +190,17 @@ public class Grantiva {
                 deviceIntelligence: deviceIntelligence
             )
         }
+
+        #if targetEnvironment(simulator)
+        // Simulator path without an API key — give a clear, actionable error instead
+        // of letting DeviceCompatibility throw a generic deviceNotSupported.
+        Logger.error(
+            "validateAttestation() called on iOS Simulator without an API key. " +
+            "Initialize with Grantiva(teamId:apiKey:) for simulator builds. " +
+            "See https://docs.grantiva.io/simulator"
+        )
+        throw GrantivaError.simulatorAPIKeyRequired
+        #endif
 
         try DeviceCompatibility.checkCompatibility()
         
