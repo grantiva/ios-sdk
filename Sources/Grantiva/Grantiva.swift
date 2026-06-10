@@ -238,13 +238,18 @@ public class Grantiva {
                     keyId: existingKeyId,
                     challenge: challengeResponse.challenge
                 )
-            } catch GrantivaError.reattestRequired {
-                // Server has invalidated the stored attestation row (rpIdHash drift or
-                // signature mismatch). Drop local key state and fall through to the full
-                // attest path below. Request a fresh challenge — the previous one was
-                // consumed by the failed refresh. Also clear the keyId so a fresh one
-                // is generated; App Attest does not permit re-attesting the same key.
-                Logger.warning("Server reported reattest_required — clearing local key state and re-attesting")
+            } catch GrantivaError.reattestRequired, GrantivaError.assertionKeyInvalid {
+                // Two triggers, same recovery:
+                // - reattestRequired: server invalidated the stored attestation row
+                //   (rpIdHash drift or signature mismatch).
+                // - assertionKeyInvalid: Apple rejected generateAssertion locally
+                //   (DCError 2/3) — the stored keyId no longer maps to a usable
+                //   Secure Enclave key (backup restore, state drift).
+                // Drop local key state and fall through to the full attest path below.
+                // Request a fresh challenge — the previous one was consumed by the
+                // failed refresh. Also clear the keyId so a fresh one is generated;
+                // App Attest does not permit re-attesting the same key.
+                Logger.warning("Stored key unusable for assertion refresh — clearing local key state and re-attesting")
                 keyManager.clearStoredKeyId()
                 tokenManager.clearTokens()
                 let freshChallenge = try await apiClient.requestChallenge()

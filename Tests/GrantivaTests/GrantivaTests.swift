@@ -69,6 +69,40 @@ final class GrantivaTests: XCTestCase {
         XCTAssertNotNil(error.errorDescription)
         XCTAssertNotNil(error.failureReason)
     }
+
+    func testAssertionKeyInvalidErrorMessages() {
+        let error = GrantivaError.assertionKeyInvalid
+        XCTAssertNotNil(error.errorDescription)
+        XCTAssertNotNil(error.failureReason)
+    }
+
+    // Regression test for the assertion-path self-heal: DCError invalidInput (2) and
+    // invalidKey (3) from generateAssertion must map to `assertionKeyInvalid` so
+    // validateAttestation() clears local key state and re-attests, instead of
+    // surfacing a permanent `validationFailed` on every launch.
+    func testAssertionErrorMappingTriggersSelfHeal() {
+        let dcDomain = "com.apple.devicecheck.error"
+
+        guard case .assertionKeyInvalid = AttestationManager.mapAssertionError(NSError(domain: dcDomain, code: 2)) else {
+            return XCTFail("DCError invalidInput (2) should map to assertionKeyInvalid")
+        }
+        guard case .assertionKeyInvalid = AttestationManager.mapAssertionError(NSError(domain: dcDomain, code: 3)) else {
+            return XCTFail("DCError invalidKey (3) should map to assertionKeyInvalid")
+        }
+    }
+
+    func testAssertionErrorMappingLeavesTransientErrorsAlone() {
+        let dcDomain = "com.apple.devicecheck.error"
+
+        // serverUnavailable (4) is transient — re-attesting would burn the key for nothing.
+        guard case .validationFailed = AttestationManager.mapAssertionError(NSError(domain: dcDomain, code: 4)) else {
+            return XCTFail("DCError serverUnavailable (4) should stay validationFailed")
+        }
+        // Same codes from a different domain (e.g. NSURLErrorDomain) must not trigger self-heal.
+        guard case .validationFailed = AttestationManager.mapAssertionError(NSError(domain: NSURLErrorDomain, code: 2)) else {
+            return XCTFail("Non-DeviceCheck domains should stay validationFailed")
+        }
+    }
     
     func testDeviceIntelligenceExtraction() {
         let riskScore = 75
