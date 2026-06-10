@@ -63,8 +63,24 @@ internal class AttestationManager {
         } catch {
             let nsError = error as NSError
             Logger.error("DCAppAttestService.generateAssertion failed: domain=\(nsError.domain) code=\(nsError.code) description=\(nsError.localizedDescription)")
-            throw GrantivaError.validationFailed
+            throw Self.mapAssertionError(nsError)
         }
+    }
+
+    /// Maps a `DCAppAttestService.generateAssertion` failure to a `GrantivaError`.
+    ///
+    /// DCErrorDomain codes 2 (invalidInput) and 3 (invalidKey) both mean the stored
+    /// keyId references a key the Secure Enclave cannot use for assertions — the local
+    /// "attested" state has drifted from reality (backup restore, device transfer,
+    /// partially-completed prior attestation). These are recoverable by re-attesting
+    /// with a fresh key, so they map to `assertionKeyInvalid` and trigger the
+    /// self-heal path in `validateAttestation()`. Everything else (e.g. code 4,
+    /// serverUnavailable) is transient and stays `validationFailed`.
+    static func mapAssertionError(_ error: NSError) -> GrantivaError {
+        if error.domain == "com.apple.devicecheck.error" && (error.code == 2 || error.code == 3) {
+            return .assertionKeyInvalid
+        }
+        return .validationFailed
     }
 
     func checkDeviceSupport() -> Bool {

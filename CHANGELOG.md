@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.0.5 — 2026-06-10
+
+### Bug Fixes
+
+- `validateAttestation()` now self-heals when Apple rejects `generateAssertion()` with `DCError.invalidInput` (code 2) or `DCError.invalidKey` (code 3) — the errors App Attest returns when the stored keyId references a Secure Enclave key that can no longer produce assertions (backup restore/device transfer, or local "attested" state drifting from reality). Previously this collapsed to a permanent `validationFailed` on every launch: the assertion-refresh path only recovered from the server-driven `reattestRequired`, never from a local Apple rejection, so affected devices were wedged until the app's keychain state was manually cleared. The SDK now clears the stored keyId + tokens, requests a fresh challenge, and runs full attestation once — the same recovery the `reattestRequired` path already used.
+- New `GrantivaError.assertionKeyInvalid` case (informational — handled internally by the recovery path; surfaces only if the follow-up full attestation also fails).
+
+---
+
 ## 2.0.4 — 2026-05-10
 
 ### Features
