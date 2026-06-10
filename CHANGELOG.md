@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.0.6 — 2026-06-10
+
+### Bug Fixes
+
+- Fixed the flag SSE stream churning in a 30-second connect/timeout/reconnect loop. The streaming session's `timeoutIntervalForRequest` was set to 30s under the assumption it was a connect timeout — it is an idle timeout (time between received bytes), so any quiet period on the stream killed the connection with NSURLError -1001. The idle timeout is now 75s, sized to ~3 missed server keepalives (the backend now emits a `: keepalive` SSE comment every 20s — requires backend with keepalive support). A genuine 75s silence still fires the timeout so dead connections (network drop without a FIN) are detected and reconnected.
+- Reconnect backoff now resets after a healthy connection (≥60s uptime) drops. Previously the backoff only reset on a clean server close, so devices on flaky networks compounded delays from failures hours apart and crept to a permanent 30s reconnect delay.
+
+---
+
 ## 2.0.5 — 2026-06-10
 
 ### Bug Fixes
