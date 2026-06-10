@@ -29,6 +29,21 @@ internal final class FlagSSEClient: @unchecked Sendable {
     private let minBackoff: TimeInterval = 1.0
     private let maxBackoff: TimeInterval = 30.0
 
+    /// A connection that survived at least this long before dropping counts as
+    /// "healthy" — its failure resets the backoff to `minBackoff` instead of
+    /// continuing to grow it. Without this, a device on flaky wifi creeps to a
+    /// permanent `maxBackoff` reconnect delay even when connections last hours
+    /// between drops.
+    static let healthyConnectionThreshold: TimeInterval = 60
+
+    /// Idle timeout for the stream. This is `timeoutIntervalForRequest`, which
+    /// fires whenever no bytes arrive for this long — NOT a connect timeout.
+    /// The backend sends a `: keepalive` comment every ~20s, so 75s of silence
+    /// (~3 missed keepalives) genuinely means a dead connection and we *want*
+    /// the timeout to fire and trigger a reconnect. Must comfortably exceed the
+    /// server keepalive interval or the stream churns on every quiet period.
+    static let idleTimeout: TimeInterval = 75
+
     // MARK: - Init
 
     init(
@@ -73,6 +88,7 @@ internal final class FlagSSEClient: @unchecked Sendable {
         while !Task.isCancelled {
             guard lock.withLock({ _isRunning }) else { return }
 
+            let connectedAt = ContinuousClock.now
             do {
                 try await connect()
                 // Clean disconnect — reset backoff and reconnect immediately
@@ -81,6 +97,12 @@ internal final class FlagSSEClient: @unchecked Sendable {
             } catch is CancellationError {
                 return
             } catch {
+                // A long-lived connection that eventually dropped is not a sign of
+                // a failing endpoint — start the backoff over instead of compounding
+                // delays from failures that happened hours apart.
+                if connectedAt.duration(to: .now) > .seconds(Self.healthyConnectionThreshold) {
+                    backoff = minBackoff
+                }
                 Logger.debug("[Grantiva] SSE disconnected (\(error.localizedDescription)). Reconnecting in \(Int(backoff))s")
             }
 
@@ -104,10 +126,12 @@ internal final class FlagSSEClient: @unchecked Sendable {
         request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
         applyAuth(to: &request)
 
-        // Use a URLSession that never times out on the resource so the stream can
-        // stay open indefinitely. The request itself still has a connect timeout.
+        // `timeoutIntervalForResource` is the total lifetime — infinite so the
+        // stream can stay open indefinitely. `timeoutIntervalForRequest` is an
+        // IDLE timeout (time between received bytes), sized to ~3 server
+        // keepalives — see `idleTimeout`.
         let sessionConfig = URLSessionConfiguration.default
-        sessionConfig.timeoutIntervalForRequest = 30
+        sessionConfig.timeoutIntervalForRequest = Self.idleTimeout
         sessionConfig.timeoutIntervalForResource = .infinity
         let session = URLSession(configuration: sessionConfig)
         defer { session.invalidateAndCancel() }

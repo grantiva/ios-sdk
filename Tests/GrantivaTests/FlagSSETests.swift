@@ -4,6 +4,23 @@ import XCTest
 /// Tests for the SSE flag streaming client and FlagService integration.
 final class FlagSSETests: XCTestCase {
 
+    // MARK: - Stream timeout contract
+
+    // Regression test for the 30s idle-timeout churn loop: the stream session's
+    // idle timeout must comfortably exceed the backend keepalive interval (20s,
+    // see FlagSSEController) or every quiet period kills and reconnects the
+    // stream. 3 missed keepalives = dead connection.
+    func testIdleTimeoutCoversMultipleServerKeepalives() {
+        let serverKeepaliveInterval: TimeInterval = 20
+        XCTAssertGreaterThanOrEqual(FlagSSEClient.idleTimeout, serverKeepaliveInterval * 3)
+    }
+
+    func testHealthyConnectionThresholdIsReachable() {
+        // A connection must be able to prove itself "healthy" before the idle
+        // timeout can kill it, or the backoff reset could never trigger.
+        XCTAssertLessThan(FlagSSEClient.healthyConnectionThreshold, FlagSSEClient.idleTimeout)
+    }
+
     // MARK: - JSON classification (mirrors FlagSSEClient.classify)
 
     func testClassifyBoolTrue() {
