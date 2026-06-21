@@ -111,6 +111,43 @@ internal class GrantivaAPIClient {
         return .validationFailed
     }
 
+    /// Calls `POST /api/v1/attestation/refresh` with an assertion to get a new JWT.
+    func refreshWithAssertion(_ request: AssertionRefreshRequest) async throws -> AssertionRefreshResponse {
+        let url = URL(string: "\(configuration.baseURL)/api/v1/attestation/refresh")!
+
+        var httpRequest = URLRequest(url: url)
+        httpRequest.httpMethod = "POST"
+        httpRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        applyAuth(to: &httpRequest)
+
+        do {
+            let jsonData = try JSONEncoder().encode(request)
+            httpRequest.httpBody = jsonData
+
+            let (data, response) = try await session.data(for: httpRequest)
+
+            guard let httpResponse = response as? HTTPURLResponse else {
+                throw GrantivaError.invalidResponse
+            }
+
+            guard httpResponse.statusCode == 200 else {
+                let body = String(data: data, encoding: .utf8) ?? ""
+                print("[Grantiva API] Refresh failed (\(httpResponse.statusCode)): \(body)")
+                // 409 = backend has invalidated the stored attestation row and is asking
+                // the SDK to re-attest. Surface a distinct error so the caller can self-heal.
+                if httpResponse.statusCode == 409 {
+                    throw GrantivaError.reattestRequired
+                }
+                throw GrantivaError.validationFailed
+            }
+
+            return try JSONDecoder().decode(AssertionRefreshResponse.self, from: data)
+        } catch {
+            if error is GrantivaError { throw error }
+            throw GrantivaError.networkError(error)
+        }
+    }
+
     private func applyAuth(to request: inout URLRequest) {
         if let apiKey = configuration.apiKey {
             request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")

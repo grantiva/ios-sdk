@@ -5,6 +5,10 @@ public enum GrantivaError: LocalizedError {
     case attestationNotAvailable
     case networkError(Error)
     case validationFailed
+    /// Server reported the device's stored attestation is no longer cryptographically
+    /// valid (rpIdHash drift or signature mismatch). The SDK responds by clearing the
+    /// cached keyId/attested flag and rerunning the full attestation flow once.
+    case reattestRequired
     case tokenExpired
     case configurationError
     case keyGenerationFailed
@@ -19,6 +23,22 @@ public enum GrantivaError: LocalizedError {
     ///   - limit: The plan's MAD ceiling.
     ///   - current: The current month's MAD count that triggered the limit.
     case limitExceeded(limit: Int, current: Int)
+    /// Thrown when `validateAttestation()` is called in the iOS Simulator without
+    /// an API key. Initialize with `Grantiva(teamId:apiKey:)` for simulator builds.
+    case simulatorAPIKeyRequired
+    /// Apple rejected `DCAppAttestService.attestKey` with `DCError.invalidInput`
+    /// (code 2). This typically means the keyId has already been attested in a
+    /// prior session and cannot be re-attested — App Attest permits one attestation
+    /// per key over its lifetime. The SDK self-heals by clearing the stored keyId
+    /// and generating a fresh one once before bubbling this up.
+    case keyAlreadyAttested
+    /// Apple rejected `DCAppAttestService.generateAssertion` with `DCError.invalidInput`
+    /// (code 2) or `DCError.invalidKey` (code 3). The stored keyId references a key the
+    /// Secure Enclave can no longer use for assertions — classically after a backup
+    /// restore/device transfer (the keychain keyId migrates, Secure Enclave keys never
+    /// do), or when the local "attested" flag drifted from reality. The SDK self-heals
+    /// by clearing the stored key state and running the full attestation flow once.
+    case assertionKeyInvalid
 
     public var errorDescription: String? {
         switch self {
@@ -30,6 +50,8 @@ public enum GrantivaError: LocalizedError {
             return "Network error occurred: \(error.localizedDescription)"
         case .validationFailed:
             return "Attestation validation failed"
+        case .reattestRequired:
+            return "Stored device key state diverged from server — re-attestation required"
         case .tokenExpired:
             return "Authentication token has expired"
         case .configurationError:
@@ -48,6 +70,12 @@ public enum GrantivaError: LocalizedError {
             return "Attestation failed: \(reason)"
         case .limitExceeded(let limit, let current):
             return "Monthly attestation limit reached (\(current)/\(limit) MAD). Upgrade at grantiva.io/upgrade."
+        case .simulatorAPIKeyRequired:
+            return "App Attest is unavailable in the iOS Simulator — pass an API key to Grantiva(teamId:apiKey:) for simulator builds"
+        case .keyAlreadyAttested:
+            return "Stored device key was already attested in a prior session — App Attest does not permit re-attesting the same key"
+        case .assertionKeyInvalid:
+            return "Stored device key can no longer generate assertions — re-attestation with a fresh key required"
         }
     }
 
@@ -61,6 +89,8 @@ public enum GrantivaError: LocalizedError {
             return "Check your internet connection and try again"
         case .validationFailed:
             return "The device attestation could not be verified by the server"
+        case .reattestRequired:
+            return "Local key/keychain state is out of sync with the server's stored attestation"
         case .tokenExpired:
             return "The authentication token needs to be refreshed"
         case .configurationError:
@@ -79,6 +109,12 @@ public enum GrantivaError: LocalizedError {
             return reason
         case .limitExceeded:
             return "Upgrade your Grantiva plan at grantiva.io/upgrade to increase your MAD limit"
+        case .simulatorAPIKeyRequired:
+            return "Create a development API key in the Grantiva dashboard (Dashboard → API Keys) and pass it to Grantiva(teamId:apiKey:). See https://docs.grantiva.io/simulator"
+        case .keyAlreadyAttested:
+            return "The keyId persisted from a previous install or session. The SDK clears it and generates a fresh one automatically; this error only surfaces if the second attestation attempt also fails."
+        case .assertionKeyInvalid:
+            return "The keyId in the keychain references a Secure Enclave key that is unusable for assertions (e.g. after a backup restore to a different device). The SDK clears the stored key state and re-attests automatically; this error only surfaces if that recovery also fails."
         }
     }
 }

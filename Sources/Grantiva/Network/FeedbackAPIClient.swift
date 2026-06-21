@@ -6,10 +6,12 @@ internal final class FeedbackAPIClient: @unchecked Sendable {
     private let session: URLSession
     private let teamId: String
     private let dateFormatter: ISO8601DateFormatter
+    private let getToken: @Sendable () -> String?
 
-    init(configuration: GrantivaConfiguration, teamId: String) {
+    init(configuration: GrantivaConfiguration, teamId: String, getToken: @escaping @Sendable () -> String? = { nil }) {
         self.configuration = configuration
         self.teamId = teamId
+        self.getToken = getToken
         self.dateFormatter = ISO8601DateFormatter()
 
         let sessionConfig = URLSessionConfiguration.default
@@ -172,11 +174,15 @@ internal final class FeedbackAPIClient: @unchecked Sendable {
         var request = URLRequest(url: url)
         request.httpMethod = method
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        if let apiKey = configuration.apiKey {
+        // Always send Bundle ID + Team ID so the backend can scope feedback to
+        // the right app. Auth precedence: attestation JWT (real device) >
+        // API key (simulator/dev). The backend rejects requests with neither.
+        request.setValue(getBundleId(), forHTTPHeaderField: "X-Bundle-ID")
+        request.setValue(teamId, forHTTPHeaderField: "X-Team-ID")
+        if let token = getToken() {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        } else if let apiKey = configuration.apiKey {
             request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-        } else {
-            request.setValue(getBundleId(), forHTTPHeaderField: "X-Bundle-ID")
-            request.setValue(teamId, forHTTPHeaderField: "X-Team-ID")
         }
         return request
     }

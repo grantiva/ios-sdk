@@ -6,9 +6,11 @@ internal class DeviceIntelligenceExtractor {
         let dateFormatter = ISO8601DateFormatter()
         let lastAttestationDate = response.lastAttestationDate != nil ? dateFormatter.date(from: response.lastAttestationDate!) : nil
         
+        let riskCategory = RiskCategory(rawValue: response.riskCategory) ?? .trusted
         return DeviceIntelligence(
             deviceId: response.deviceId,
             riskScore: response.riskScore,
+            riskCategory: riskCategory,
             deviceIntegrity: response.deviceIntegrity,
             jailbreakDetected: response.jailbreakDetected,
             attestationCount: response.attestationCount,

@@ -489,21 +489,21 @@ final class FeedbackTests: XCTestCase {
         XCTAssertTrue(feedback1 === feedback2, "feedback property should return the same instance")
     }
 
-    func testGrantivaIdentifyWithString() async throws {
+    func testGrantivaIdentifyWithString() async {
         let grantiva = Grantiva(teamId: "TEAM123")
         XCTAssertNil(grantiva.currentUserId)
         await grantiva.identify("user_789")
         XCTAssertEqual(grantiva.currentUserId, "user_789")
     }
 
-    func testGrantivaIdentifyWithContext() async throws {
+    func testGrantivaIdentifyWithContext() async {
         let grantiva = Grantiva(teamId: "TEAM123")
         await grantiva.identify(UserContext(userId: "user_789", properties: ["plan": "enterprise"]))
         XCTAssertEqual(grantiva.currentUserId, "user_789")
         XCTAssertEqual(grantiva.currentUserContext?.properties["plan"], "enterprise")
     }
 
-    func testGrantivaClearIdentity() async throws {
+    func testGrantivaClearIdentity() async {
         let grantiva = Grantiva(teamId: "TEAM123")
         await grantiva.identify("user_789")
         await grantiva.clearIdentity()

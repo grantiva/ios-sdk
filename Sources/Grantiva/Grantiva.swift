@@ -1,4 +1,7 @@
 import Foundation
+#if os(iOS)
+import UIKit
+#endif
 
 public class Grantiva {
     private let apiClient: GrantivaAPIClient
@@ -10,6 +13,9 @@ public class Grantiva {
     private let configuration: GrantivaConfiguration
     internal let identity: IdentityProvider
 
+    // Background/foreground lifecycle observers (iOS only)
+    private var lifecycleObservers: [NSObjectProtocol] = []
+
     /// Lazy-initialized feedback service for feature requests and support tickets.
     ///
     /// ```swift
@@ -18,7 +24,11 @@ public class Grantiva {
     /// let ticket = try await grantiva.feedback.submitTicket(subject: "Help", body: "Details...")
     /// ```
     public private(set) lazy var feedback: FeedbackService = {
-        let feedbackClient = FeedbackAPIClient(configuration: configuration, teamId: teamId)
+        let feedbackClient = FeedbackAPIClient(
+            configuration: configuration,
+            teamId: teamId,
+            getToken: { [tokenManager] in tokenManager.getStoredToken()?.token }
+        )
         return FeedbackService(apiClient: feedbackClient, identity: identity)
     }()
 
@@ -30,7 +40,11 @@ public class Grantiva {
     /// let limit = try await grantiva.flags.intValue(for: "upload_limit", default: 10)
     /// ```
     public private(set) lazy var flags: FlagService = {
-        let flagClient = FlagAPIClient(configuration: configuration, teamId: teamId)
+        let flagClient = FlagAPIClient(
+            configuration: configuration,
+            teamId: teamId,
+            getToken: { [tokenManager] in tokenManager.getStoredToken()?.token }
+        )
         return FlagService(apiClient: flagClient, identity: identity)
     }()
 
@@ -56,8 +70,28 @@ public class Grantiva {
             getDeviceId: { isAPIKey ? PlatformSupport.getDeviceIdentifier() : nil }
         )
         #if targetEnvironment(simulator)
-        Logger.warning("[Grantiva] ⚠️ Running in simulator — App Attest unavailable. Using API key fallback. riskScore will be nil. Test on a real device to verify full attestation.")
+        if apiKey == nil {
+            // No-apiKey simulator builds will throw `simulatorAPIKeyRequired` from
+            // validateAttestation(); warn at init so the developer sees the actionable
+            // setup link before they hit the runtime error.
+            Logger.warning(
+                "Running on iOS Simulator — App Attest is unavailable. " +
+                "Call Grantiva(teamId:apiKey:) with a development API key to authenticate " +
+                "simulator builds. Get your key at: Dashboard → API Keys. " +
+                "See https://docs.grantiva.io/simulator for setup instructions."
+            )
+        } else {
+            // apiKey-mode simulator builds work, but `riskScore` will be nil because
+            // there is no attestation. Worth saying so once at init.
+            Logger.warning("[Grantiva] Running in simulator with API key fallback. riskScore will be nil. Test on a real device for full attestation.")
+        }
         #endif
+
+        registerLifecycleObservers()
+    }
+
+    deinit {
+        lifecycleObservers.forEach { NotificationCenter.default.removeObserver($0) }
     }
 
     /// Associate a user identity and context with this Grantiva instance.
@@ -122,8 +156,15 @@ public class Grantiva {
     
     public func validateAttestation() async throws -> AttestationResult {
         Logger.info("Starting attestation validation...")
+
         #if targetEnvironment(simulator)
-        Logger.warning("[Grantiva] ⚠️ Running in simulator — App Attest unavailable. Using API key fallback. riskScore will be nil. Test on a real device to verify full attestation.")
+        // App Attest is unavailable in the simulator. Without an API key fallback,
+        // throw a targeted error rather than letting DeviceCompatibility surface a
+        // generic `deviceNotSupported`. Init has already logged the setup link.
+        guard configuration.apiKey != nil else {
+            Logger.error("validateAttestation() called on iOS Simulator without an API key. Initialize with Grantiva(teamId:apiKey:) for simulator builds. See https://docs.grantiva.io/simulator")
+            throw GrantivaError.simulatorAPIKeyRequired
+        }
         #endif
 
         // When an API key is configured (e.g. simulator / dev builds), skip the
@@ -134,12 +175,14 @@ public class Grantiva {
             let deviceIntelligence = DeviceIntelligence(
                 deviceId: PlatformSupport.getDeviceIdentifier(),
                 riskScore: nil,
+                riskCategory: .trusted,
                 deviceIntegrity: "api_key_mode",
                 jailbreakDetected: false,
                 attestationCount: 0,
                 lastAttestationDate: nil
             )
             heartbeatManager.start()
+            await startFlagStreaming()
             return AttestationResult(
                 isValid: true,
                 token: "simulator-dev-token",
@@ -148,20 +191,31 @@ public class Grantiva {
             )
         }
 
+        #if targetEnvironment(simulator)
+        // Simulator path without an API key — give a clear, actionable error instead
+        // of letting DeviceCompatibility throw a generic deviceNotSupported.
+        Logger.error(
+            "validateAttestation() called on iOS Simulator without an API key. " +
+            "Initialize with Grantiva(teamId:apiKey:) for simulator builds. " +
+            "See https://docs.grantiva.io/simulator"
+        )
+        throw GrantivaError.simulatorAPIKeyRequired
+        #endif
+
         try DeviceCompatibility.checkCompatibility()
         
         if let storedToken = tokenManager.getStoredToken() {
             if !tokenManager.isTokenExpired(storedToken.expiresAt) {
                 Logger.debug("Using cached token")
-                let deviceIntelligence = DeviceIntelligence(
+                let deviceIntelligence = tokenManager.getStoredDeviceIntelligence() ?? DeviceIntelligence(
                     deviceId: PlatformSupport.getDeviceIdentifier(),
                     riskScore: nil,
+                    riskCategory: .trusted,
                     deviceIntegrity: "cached",
                     jailbreakDetected: false,
                     attestationCount: 0,
                     lastAttestationDate: nil
                 )
-                
                 return AttestationResult(
                     isValid: true,
                     token: storedToken.token,
@@ -175,25 +229,78 @@ public class Grantiva {
         let challengeResponse = try await apiClient.requestChallenge()
         Logger.debug("Received challenge: \(challengeResponse.challenge)")
 
+        // If the key has already been attested, use the assertion path for refresh.
+        // Re-calling attestKey with the same key is rejected by the backend's replay protection.
+        if keyManager.hasBeenAttested(), let existingKeyId = keyManager.getStoredKeyId() {
+            Logger.info("Key already attested — using assertion path for token refresh")
+            do {
+                return try await refreshViaAssertion(
+                    keyId: existingKeyId,
+                    challenge: challengeResponse.challenge
+                )
+            } catch GrantivaError.reattestRequired, GrantivaError.assertionKeyInvalid {
+                // Two triggers, same recovery:
+                // - reattestRequired: server invalidated the stored attestation row
+                //   (rpIdHash drift or signature mismatch).
+                // - assertionKeyInvalid: Apple rejected generateAssertion locally
+                //   (DCError 2/3) — the stored keyId no longer maps to a usable
+                //   Secure Enclave key (backup restore, state drift).
+                // Drop local key state and fall through to the full attest path below.
+                // Request a fresh challenge — the previous one was consumed by the
+                // failed refresh. Also clear the keyId so a fresh one is generated;
+                // App Attest does not permit re-attesting the same key.
+                Logger.warning("Stored key unusable for assertion refresh — clearing local key state and re-attesting")
+                keyManager.clearStoredKeyId()
+                tokenManager.clearTokens()
+                let freshChallenge = try await apiClient.requestChallenge()
+                return try await performFullAttestation(challenge: freshChallenge.challenge)
+            }
+        }
+
+        return try await performFullAttestation(challenge: challengeResponse.challenge)
+    }
+
+    /// Runs the App Attest generateKey → attest → /validate flow against the supplied
+    /// (single-use) challenge. Extracted so the assertion-refresh self-heal path can
+    /// re-enter the attest flow with a fresh challenge after the server reports
+    /// `reattestRequired`.
+    ///
+    /// If Apple rejects `attestKey` with `keyAlreadyAttested` (DCError 2), drop the
+    /// stored keyId and retry once with a fresh one. This handles the case where
+    /// the keyId persisted across an event that cleared the "attested" flag (e.g.,
+    /// a partial keychain wipe, or earlier SDK versions that only cleared the flag).
+    /// Limited to one retry to prevent infinite loops on persistent Apple errors.
+    private func performFullAttestation(challenge: String) async throws -> AttestationResult {
+        do {
+            return try await attemptFullAttestation(challenge: challenge)
+        } catch GrantivaError.keyAlreadyAttested {
+            Logger.warning("Apple reported keyAlreadyAttested — clearing stored keyId and retrying with a fresh key")
+            keyManager.clearStoredKeyId()
+            let freshChallenge = try await apiClient.requestChallenge()
+            return try await attemptFullAttestation(challenge: freshChallenge.challenge)
+        }
+    }
+
+    private func attemptFullAttestation(challenge: String) async throws -> AttestationResult {
         Logger.info("Getting or creating key ID...")
         let keyId = try await keyManager.getOrCreateKeyId()
         Logger.debug("Key ID: \(keyId)")
 
         Logger.info("Generating attestation object...")
-        let attestationObject = try await attestationManager.generateAttestation(keyId: keyId, challenge: challengeResponse.challenge)
+        let attestationObject = try await attestationManager.generateAttestation(keyId: keyId, challenge: challenge)
         Logger.debug("Attestation object size: \(attestationObject.count) bytes")
 
-        let clientDataHashData = attestationManager.createClientDataHash(challenge: challengeResponse.challenge)
+        let clientDataHashData = attestationManager.createClientDataHash(challenge: challenge)
         let clientDataHash = clientDataHashData.base64EncodedString()
         Logger.debug("Client data hash: \(clientDataHash)")
-        
+
         let attestationRequest = AttestationRequest(
             bundleId: Bundle.main.bundleIdentifier ?? "",
             teamId: teamId,
             keyId: keyId,
             attestationObject: attestationObject.base64EncodedString(),
             clientDataHash: clientDataHash,
-            challenge: challengeResponse.challenge,
+            challenge: challenge,
             deviceModel: PlatformSupport.getHardwareModel(),
             osVersion: PlatformSupport.getOSVersion(),
             appVersion: PlatformSupport.getAppVersion(),
@@ -206,34 +313,40 @@ public class Grantiva {
                 #else
                 return nil
                 #endif
-            }()
+            }(),
+            deviceFingerprint: PlatformSupport.getDeviceFingerprint()
         )
-        
+
         Logger.debug("Sending attestation for bundle: \(attestationRequest.bundleId), team: \(attestationRequest.teamId)")
 
         let response = try await apiClient.validateAttestation(attestationRequest)
         Logger.info("Attestation validated: \(response.isValid)")
-        
+
         let dateFormatter = ISO8601DateFormatter()
         guard let expiresAt = dateFormatter.date(from: response.expiresAt) else {
             throw GrantivaError.invalidResponse
         }
-        
+
         tokenManager.saveToken(response.token, expiresAt: expiresAt)
-        
+        keyManager.markAsAttested()
+
+        let riskCategory = RiskCategory(rawValue: response.deviceIntelligence.riskCategory) ?? .trusted
         let deviceIntelligence = DeviceIntelligence(
             deviceId: response.deviceIntelligence.deviceId,
             riskScore: response.deviceIntelligence.riskScore,
+            riskCategory: riskCategory,
             deviceIntegrity: response.deviceIntelligence.deviceIntegrity,
             jailbreakDetected: response.deviceIntelligence.jailbreakDetected,
             attestationCount: response.deviceIntelligence.attestationCount,
             lastAttestationDate: response.deviceIntelligence.lastAttestationDate != nil ? dateFormatter.date(from: response.deviceIntelligence.lastAttestationDate!) : nil
         )
-        
+        tokenManager.saveDeviceIntelligence(deviceIntelligence)
+
         let customClaims = response.customClaims
-        
+
         Logger.info("Attestation completed successfully")
         heartbeatManager.start()
+        await startFlagStreaming()
         return AttestationResult(
             isValid: response.isValid,
             token: response.token,
@@ -243,6 +356,47 @@ public class Grantiva {
         )
     }
     
+    /// Refreshes the JWT using an App Attest assertion (for already-attested keys).
+    private func refreshViaAssertion(keyId: String, challenge: String) async throws -> AttestationResult {
+        let assertionData = try await attestationManager.generateAssertion(keyId: keyId, challenge: challenge)
+        let clientDataHashData = attestationManager.createClientDataHash(challenge: challenge)
+
+        let refreshRequest = AssertionRefreshRequest(
+            keyId: keyId,
+            assertion: assertionData.base64EncodedString(),
+            clientDataHash: clientDataHashData.base64EncodedString(),
+            challenge: challenge
+        )
+
+        let response = try await apiClient.refreshWithAssertion(refreshRequest)
+
+        let dateFormatter = ISO8601DateFormatter()
+        guard let expiresAt = dateFormatter.date(from: response.expiresAt) else {
+            throw GrantivaError.invalidResponse
+        }
+
+        tokenManager.saveToken(response.token, expiresAt: expiresAt)
+        Logger.info("Token refreshed via assertion")
+
+        let deviceIntelligence = tokenManager.getStoredDeviceIntelligence() ?? DeviceIntelligence(
+            deviceId: PlatformSupport.getDeviceIdentifier(),
+            riskScore: nil,
+            riskCategory: .trusted,
+            deviceIntegrity: "asserted",
+            jailbreakDetected: false,
+            attestationCount: 0,
+            lastAttestationDate: nil
+        )
+
+        heartbeatManager.start()
+        return AttestationResult(
+            isValid: true,
+            token: response.token,
+            expiresAt: expiresAt,
+            deviceIntelligence: deviceIntelligence
+        )
+    }
+
     public func refreshToken() async throws -> AttestationResult? {
         guard let storedToken = tokenManager.getStoredToken() else {
             return nil
@@ -255,6 +409,7 @@ public class Grantiva {
         let deviceIntelligence = DeviceIntelligence(
             deviceId: PlatformSupport.getDeviceIdentifier(),
             riskScore: nil,
+            riskCategory: .trusted,
             deviceIntegrity: "valid",
             jailbreakDetected: false,
             attestationCount: 0,
@@ -289,14 +444,67 @@ public class Grantiva {
         return !tokenManager.isTokenExpired(storedToken.expiresAt)
     }
     
-    /// Clears stored attestation data for testing purposes
-    /// This will force generation of a new key on next attestation
+    /// Clears stored attestation data for testing purposes.
+    ///
+    /// This stops all background services (heartbeats, SSE stream) and forces a fresh
+    /// attestation on the next `validateAttestation()` call.
     public func clearStoredData() {
         Logger.info("Clearing stored attestation data...")
         keyManager.clearStoredKeyId()
         tokenManager.clearTokens()
         heartbeatManager.stop()
+        let flagService = flags
+        Task { await flagService.stopStreaming() }
         Logger.info("Stored data cleared")
     }
-    
+
+    // MARK: - Flag Streaming Helpers
+
+    /// Start SSE flag streaming. The `getToken` closure returns the current stored JWT
+    /// so the SSE client always uses a fresh token on reconnect.
+    private func startFlagStreaming() async {
+        await flags.startStreaming(
+            configuration: configuration,
+            teamId: teamId,
+            tokenManager: tokenManager
+        )
+    }
+
+    // MARK: - App Lifecycle
+
+    /// Registers for app background/foreground notifications to pause and resume SSE streaming.
+    private func registerLifecycleObservers() {
+        #if os(iOS)
+        let background = NotificationCenter.default.addObserver(
+            forName: UIApplication.didEnterBackgroundNotification,
+            object: nil,
+            queue: nil
+        ) { [weak self] _ in
+            guard let self else { return }
+            let flagService = self.flags
+            Task { await flagService.stopStreaming() }
+        }
+
+        let foreground = NotificationCenter.default.addObserver(
+            forName: UIApplication.willEnterForegroundNotification,
+            object: nil,
+            queue: nil
+        ) { [weak self] _ in
+            guard let self else { return }
+            let flagService = self.flags
+            let configuration = self.configuration
+            let teamId = self.teamId
+            let tokenManager = self.tokenManager
+            Task {
+                await flagService.startStreaming(
+                    configuration: configuration,
+                    teamId: teamId,
+                    tokenManager: tokenManager
+                )
+            }
+        }
+
+        lifecycleObservers = [background, foreground]
+        #endif
+    }
 }

@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 
 #if os(iOS)
 import UIKit
@@ -8,6 +9,22 @@ import IOKit
 #endif
 
 internal class PlatformSupport {
+
+    /// Returns a SHA256 hex digest of the device identifier. Sent to the backend
+    /// for MAD dedupe across the self-heal key-regeneration path. The raw
+    /// identifier (IDFV on iOS, IOPlatformSerialNumber on macOS) is never
+    /// transmitted — only its hash, which is opaque to the server.
+    ///
+    /// On iOS the IDFV changes when the user uninstalls the last app from this
+    /// vendor; for the dedupe use case (same install, same month) it is stable.
+    static func getDeviceFingerprint() -> String? {
+        let raw = getDeviceIdentifier()
+        guard raw != "unknown" else {
+            return nil
+        }
+        let hash = SHA256.hash(data: Data(raw.utf8))
+        return hash.map { String(format: "%02x", $0) }.joined()
+    }
 
     static func getDeviceIdentifier() -> String {
         #if os(iOS)

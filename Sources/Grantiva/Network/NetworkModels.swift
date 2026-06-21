@@ -20,6 +20,13 @@ internal struct AttestationRequest: Codable {
     let appVersion: String?
     let appBuildNumber: String?
     let platform: String?
+
+    /// Stable hardware-derived fingerprint (hex SHA256 of identifierForVendor on
+    /// iOS). The backend uses this as a secondary key in MAD lookup so the same
+    /// physical device counts once even when its App Attest key is regenerated
+    /// mid-billing-period by the self-heal path. The raw identifier is never
+    /// transmitted — only its hash.
+    let deviceFingerprint: String?
 }
 
 internal struct AttestationResponse: Codable {
@@ -32,7 +39,10 @@ internal struct AttestationResponse: Codable {
 
 internal struct DeviceIntelligenceResponse: Codable {
     let deviceId: String
+    /// Numeric risk score. `nil` on free tier; present on Pro and above.
     let riskScore: Int?
+    /// Risk category: "trusted" (0-20), "suspicious" (21-75), "blocked" (76-100). All tiers.
+    let riskCategory: String
     let deviceIntegrity: String
     let jailbreakDetected: Bool
     let attestationCount: Int
@@ -47,4 +57,18 @@ internal struct MADLimitResponse: Codable {
     let error: String
     let limit: Int
     let current: Int
+}
+
+/// Sent to `POST /api/v1/attestation/refresh` when the JWT has expired
+/// and the key has already been attested.
+internal struct AssertionRefreshRequest: Codable {
+    let keyId: String
+    let assertion: String      // base64-encoded CBOR assertion from DCAppAttestService
+    let clientDataHash: String // base64-encoded SHA256(challenge.utf8)
+    let challenge: String      // raw challenge string for server-side validation
+}
+
+internal struct AssertionRefreshResponse: Codable {
+    let token: String
+    let expiresAt: String
 }
