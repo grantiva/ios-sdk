@@ -1,0 +1,84 @@
+name: Release
+
+# Manually-triggered release. Pick the semver bump (major / minor / patch) when you click
+# "Run workflow". The job reads the current version from Sources/Grantiva/Version.swift, bumps
+# it, writes it back, commits, creates the matching git tag, and publishes a GitHub release with
+# auto-generated notes. Run this from `main`.
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_type:
+        description: "Which part of the version to bump"
+        required: true
+        type: choice
+        default: patch
+        options:
+          - patch
+          - minor
+          - major
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Compute next version
+        id: bump
+        run: |
+          set -euo pipefail
+          file="Sources/Grantiva/Version.swift"
+          current=$(grep -oE '"[0-9]+\.[0-9]+\.[0-9]+"' "$file" | head -1 | tr -d '"')
+          if [ -z "$current" ]; then echo "::error::Could not read current version from $file"; exit 1; fi
+          IFS='.' read -r major minor patch <<< "$current"
+          case "${{ inputs.release_type }}" in
+            major) major=$((major + 1)); minor=0; patch=0 ;;
+            minor) minor=$((minor + 1)); patch=0 ;;
+            patch) patch=$((patch + 1)) ;;
+          esac
+          next="${major}.${minor}.${patch}"
+          echo "current=$current" >> "$GITHUB_OUTPUT"
+          echo "next=$next" >> "$GITHUB_OUTPUT"
+          echo "Bumping $current -> $next (${{ inputs.release_type }})"
+
+      - name: Fail if tag already exists
+        run: |
+          set -euo pipefail
+          if git rev-parse "${{ steps.bump.outputs.next }}" >/dev/null 2>&1; then
+            echo "::error::Tag ${{ steps.bump.outputs.next }} already exists"; exit 1
+          fi
+
+      - name: Write version
+        run: |
+          set -euo pipefail
+          file="Sources/Grantiva/Version.swift"
+          sed -i '' -E "s/(static let current = \")[0-9]+\.[0-9]+\.[0-9]+(\")/\1${{ steps.bump.outputs.next }}\2/" "$file"
+          grep -q "\"${{ steps.bump.outputs.next }}\"" "$file"
+
+      - name: Build (gate)
+        run: swift build
+
+      - name: Commit, tag, and push
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Sources/Grantiva/Version.swift
+          git commit -m "chore(release): ${{ steps.bump.outputs.next }}"
+          git tag "${{ steps.bump.outputs.next }}"
+          git push origin "HEAD:${{ github.ref_name }}"
+          git push origin "${{ steps.bump.outputs.next }}"
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ steps.bump.outputs.next }}" \
+            --title "${{ steps.bump.outputs.next }}" \
+            --generate-notes
