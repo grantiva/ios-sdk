@@ -11,11 +11,13 @@ public actor FeedbackService {
     private let apiClient: FeedbackAPIClient
     private let cache: FeedbackCache
     private let identity: IdentityProvider
+    private let pushTokens: PushTokenStore
 
-    internal init(apiClient: FeedbackAPIClient, identity: IdentityProvider) {
+    internal init(apiClient: FeedbackAPIClient, identity: IdentityProvider, pushTokens: PushTokenStore) {
         self.apiClient = apiClient
         self.cache = FeedbackCache()
         self.identity = identity
+        self.pushTokens = pushTokens
     }
 
     // MARK: - Feature Requests
@@ -74,6 +76,11 @@ public actor FeedbackService {
 
     /// Submit a new feature request.
     ///
+    /// If a push token has been registered via `grantiva.setPushToken(_:environment:)`,
+    /// it is sent with the request so the backend subscribes this device to the new
+    /// feature's comment thread (push when an admin replies). No-op if the org has no
+    /// linked push app.
+    ///
     /// - Parameters:
     ///   - title: Title of the feature request (3-200 characters).
     ///   - description: Detailed description (10-5000 characters).
@@ -83,7 +90,9 @@ public actor FeedbackService {
             title: title,
             description: description,
             submitterId: identity.effectiveSubmitterId,
-            deviceHash: identity.deviceHash
+            deviceHash: identity.deviceHash,
+            pushToken: pushTokens.token,
+            pushEnvironment: pushTokens.environment?.rawValue
         )
         cache.invalidateFeatureRequests()
         return result
@@ -128,6 +137,10 @@ public actor FeedbackService {
 
     /// Add a comment to a feature request.
     ///
+    /// If a push token has been registered via `grantiva.setPushToken(_:environment:)`,
+    /// it is sent with the comment so the backend subscribes this device to the feature's
+    /// thread (push when an admin replies). No-op if the org has no linked push app.
+    ///
     /// - Parameters:
     ///   - featureId: The feature request UUID.
     ///   - body: The comment text (1-2000 characters).
@@ -137,7 +150,9 @@ public actor FeedbackService {
         let result = try await apiClient.addComment(
             featureId: featureId,
             authorId: identity.effectiveSubmitterId,
-            body: body
+            body: body,
+            pushToken: pushTokens.token,
+            pushEnvironment: pushTokens.environment?.rawValue
         )
         cache.invalidateFeatureRequests()
         return result
