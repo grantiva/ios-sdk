@@ -77,7 +77,7 @@ public struct DeviceContext {
             osVersion: systemInfo["systemVersion"] ?? "unknown",
             locale: Locale.current.identifier,
             timezone: TimeZone.current.identifier,
-            sdkVersion: "1.1.0",
+            sdkVersion: "2.0.6",
             environment: systemInfo["environment"] ?? "unknown"
         )
     }
