@@ -95,6 +95,42 @@ public enum RiskCategory: String {
 }
 ```
 
+## Push Notifications
+
+Register the device's APNs token so the backend can subscribe it to feedback threads
+and push it when an admin replies to a feature you submitted or commented on.
+
+Apple delivers the token to your `UIApplicationDelegate` — forward it to the SDK:
+
+```swift
+func application(_ app: UIApplication, didFinishLaunchingWithOptions opts: ...) -> Bool {
+    UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { granted, _ in
+        guard granted else { return }
+        DispatchQueue.main.async { app.registerForRemoteNotifications() }
+    }
+    return true
+}
+
+func application(_ app: UIApplication,
+                 didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
+    grantiva.setPushToken(deviceToken)            // environment auto-detected
+}
+```
+
+Once a token is set, it's attached automatically to `feedback.submitFeatureRequest(...)`
+and `feedback.addComment(...)` — the server subscribes the device to that feature's
+thread. Nothing else to call.
+
+```swift
+grantiva.setPushToken(deviceToken, environment: .production)  // override detection
+let token = grantiva.pushToken                                // currently registered token
+grantiva.clearPushToken()                                     // on opt-out / unregister
+```
+
+The APNs environment defaults to `PushEnvironment.detected` (reads the provisioning
+profile, falls back to the build configuration). Thread subscriptions require the org to
+have a linked push app in the dashboard; without one the token is ignored server-side.
+
 ## Error Handling
 
 ```swift

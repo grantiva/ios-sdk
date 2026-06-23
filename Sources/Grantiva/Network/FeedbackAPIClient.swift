@@ -58,9 +58,9 @@ internal final class FeedbackAPIClient: @unchecked Sendable {
         return model
     }
 
-    func createFeatureRequest(title: String, description: String, submitterId: String, deviceHash: String) async throws -> FeatureRequest {
+    func createFeatureRequest(title: String, description: String, submitterId: String, deviceHash: String, pushToken: String? = nil, pushEnvironment: String? = nil) async throws -> FeatureRequest {
         let url = URL(string: "\(configuration.baseURL)/api/v1/feedback/features")!
-        let body = CreateFeatureRequestBody(title: title, description: description, submitterId: submitterId, deviceHash: deviceHash)
+        let body = CreateFeatureRequestBody(title: title, description: description, submitterId: submitterId, deviceHash: deviceHash, pushToken: pushToken, pushEnvironment: pushEnvironment)
         let request = try makeRequest(url: url, method: "POST", body: body)
         let data = try await perform(request)
         let response = try JSONDecoder().decode(FeatureRequestResponse.self, from: data)
@@ -97,9 +97,9 @@ internal final class FeedbackAPIClient: @unchecked Sendable {
         return responses.compactMap { $0.toModel(dateFormatter: dateFormatter) }
     }
 
-    func addComment(featureId: UUID, authorId: String, body: String) async throws -> FeatureComment {
+    func addComment(featureId: UUID, authorId: String, body: String, pushToken: String? = nil, pushEnvironment: String? = nil) async throws -> FeatureComment {
         let url = URL(string: "\(configuration.baseURL)/api/v1/feedback/features/\(featureId)/comments")!
-        let commentBody = CreateCommentBody(authorId: authorId, body: body)
+        let commentBody = CreateCommentBody(authorId: authorId, body: body, pushToken: pushToken, pushEnvironment: pushEnvironment)
         let request = try makeRequest(url: url, method: "POST", body: commentBody)
         let data = try await perform(request)
         let response = try JSONDecoder().decode(CommentResponse.self, from: data)
