@@ -153,7 +153,40 @@ public class Grantiva {
     public var currentUserContext: UserContext? {
         identity.userContext
     }
-    
+
+    /// Associate this device with an entitlement **sharing unit** (e.g. a family/household).
+    ///
+    /// Grantiva attaches subscription entitlements to a sharing unit, so one paying member can
+    /// entitle every device in the unit. Call this (before `validateAttestation()`) on **every**
+    /// member's device with the same id, so the resulting JWT carries `custom_claims.subscription`.
+    ///
+    /// The id is opaque and stable. Use the **same value** as:
+    /// - the Apple StoreKit `appAccountToken` at purchase, and
+    /// - the Stripe Checkout `client_reference_id`.
+    ///
+    /// Apple requires `appAccountToken` to be a `UUID`, so use a UUID string here too.
+    ///
+    /// Distinct from `identify(_:)`, which sets the individual user for feedback/flags scoping.
+    ///
+    /// ```swift
+    /// grantiva.setSubjectId(familyId.uuidString)
+    /// ```
+    ///
+    /// - Parameter subjectId: A stable, opaque sharing-unit identifier (UUID string recommended).
+    public func setSubjectId(_ subjectId: String) {
+        identity.setSubjectId(subjectId)
+    }
+
+    /// Clear the entitlement sharing-unit association (e.g. on leaving the family / sign-out).
+    public func clearSubjectId() {
+        identity.setSubjectId(nil)
+    }
+
+    /// The current entitlement sharing-unit id, or `nil` if unset.
+    public var subjectId: String? {
+        identity.subjectId
+    }
+
     public func validateAttestation() async throws -> AttestationResult {
         Logger.info("Starting attestation validation...")
 
@@ -314,7 +347,8 @@ public class Grantiva {
                 return nil
                 #endif
             }(),
-            deviceFingerprint: PlatformSupport.getDeviceFingerprint()
+            deviceFingerprint: PlatformSupport.getDeviceFingerprint(),
+            subjectId: identity.subjectId
         )
 
         Logger.debug("Sending attestation for bundle: \(attestationRequest.bundleId), team: \(attestationRequest.teamId)")
@@ -365,7 +399,8 @@ public class Grantiva {
             keyId: keyId,
             assertion: assertionData.base64EncodedString(),
             clientDataHash: clientDataHashData.base64EncodedString(),
-            challenge: challenge
+            challenge: challenge,
+            subjectId: identity.subjectId
         )
 
         let response = try await apiClient.refreshWithAssertion(refreshRequest)
