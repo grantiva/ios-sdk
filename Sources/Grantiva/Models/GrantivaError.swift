@@ -17,6 +17,12 @@ public enum GrantivaError: LocalizedError {
     case rateLimited
     case feedbackNotAvailable
     case serverError(reason: String)
+    /// The tenant's Monthly Active Devices limit has been reached.
+    ///
+    /// - Parameters:
+    ///   - limit: The plan's MAD ceiling.
+    ///   - current: The current month's MAD count that triggered the limit.
+    case limitExceeded(limit: Int, current: Int)
     /// Thrown when `validateAttestation()` is called in the iOS Simulator without
     /// an API key. Initialize with `Grantiva(teamId:apiKey:)` for simulator builds.
     case simulatorAPIKeyRequired
@@ -62,6 +68,8 @@ public enum GrantivaError: LocalizedError {
             return "Feedback service is not available for this tenant"
         case .serverError(let reason):
             return "Attestation failed: \(reason)"
+        case .limitExceeded(let limit, let current):
+            return "Monthly attestation limit reached (\(current)/\(limit) MAD). Upgrade at grantiva.io/upgrade."
         case .simulatorAPIKeyRequired:
             return "App Attest is unavailable in the iOS Simulator — pass an API key to Grantiva(teamId:apiKey:) for simulator builds"
         case .keyAlreadyAttested:
@@ -99,6 +107,8 @@ public enum GrantivaError: LocalizedError {
             return "Your current plan may not include feedback features"
         case .serverError(let reason):
             return reason
+        case .limitExceeded:
+            return "Upgrade your Grantiva plan at grantiva.io/upgrade to increase your MAD limit"
         case .simulatorAPIKeyRequired:
             return "Create a development API key in the Grantiva dashboard (Dashboard → API Keys) and pass it to Grantiva(teamId:apiKey:). See https://docs.grantiva.io/simulator"
         case .keyAlreadyAttested:

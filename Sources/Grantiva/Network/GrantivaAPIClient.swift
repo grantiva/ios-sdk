@@ -87,15 +87,25 @@ internal class GrantivaAPIClient {
         }
     }
     
-    /// Parses a Vapor-format error body `{"error":true,"reason":"..."}` for 4xx responses.
-    /// 5xx responses never expose internals — falls back to `validationFailed`.
-    private func parseServerError(from data: Data, statusCode: Int) -> GrantivaError {
+    /// Parses error responses for non-200 HTTP status codes.
+    ///
+    /// - 429 with `{"error":"mad_limit_exceeded","limit":X,"current":Y}` → `.limitExceeded(limit:current:)`
+    /// - Other 4xx with `{"error":true,"reason":"..."}` (Vapor format) → `.serverError(reason:)`
+    /// - 5xx or unrecognised bodies → `.validationFailed`
+    func parseServerError(from data: Data, statusCode: Int) -> GrantivaError {
+        if statusCode == 429 {
+            if let limitResponse = try? JSONDecoder().decode(MADLimitResponse.self, from: data),
+               limitResponse.error == "mad_limit_exceeded" {
+                Logger.warning("[Grantiva API] MAD limit exceeded: \(limitResponse.current)/\(limitResponse.limit)")
+                return .limitExceeded(limit: limitResponse.limit, current: limitResponse.current)
+            }
+        }
         guard (400..<500).contains(statusCode) else {
             return .validationFailed
         }
         if let errorResponse = try? JSONDecoder().decode(ErrorResponse.self, from: data),
            !errorResponse.reason.isEmpty {
-            print("[Grantiva API] Server error (\(statusCode)): \(errorResponse.reason)")
+            Logger.debug("[Grantiva API] Server error (\(statusCode)): \(errorResponse.reason)")
             return .serverError(reason: errorResponse.reason)
         }
         return .validationFailed

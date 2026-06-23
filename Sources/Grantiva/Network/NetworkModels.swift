@@ -59,6 +59,12 @@ internal struct ErrorResponse: Codable {
     let reason: String
 }
 
+internal struct MADLimitResponse: Codable {
+    let error: String
+    let limit: Int
+    let current: Int
+}
+
 /// Sent to `POST /api/v1/attestation/refresh` when the JWT has expired
 /// and the key has already been attested.
 internal struct AssertionRefreshRequest: Codable {
