@@ -95,6 +95,35 @@ public enum RiskCategory: String {
 }
 ```
 
+## Subscriptions
+
+Grantiva can attach a subscription entitlement to a **sharing unit** (e.g. a family/household)
+and surface it in the attestation JWT as `custom_claims.subscription`. One paying member can
+entitle every device in the unit.
+
+Set the sharing-unit id **before attesting**, on **every** member's device:
+
+```swift
+grantiva.setSubjectId(familyId.uuidString)   // call before validateAttestation()
+let result = try await grantiva.validateAttestation()
+// result.token now carries custom_claims.subscription when an entitlement exists
+```
+
+The id is opaque and stable. Use the **same value** in all three places:
+
+| Where | What |
+| --- | --- |
+| Grantiva SDK | `grantiva.setSubjectId(familyId)` |
+| Apple purchase | `Product.PurchaseOption.appAccountToken(familyId)` |
+| Stripe Checkout | `client_reference_id = familyId` |
+
+Apple requires `appAccountToken` to be a `UUID`, so use a UUID string. Call `clearSubjectId()`
+on sign-out / when leaving the unit. `setSubjectId` is distinct from `identify(_:)` — the latter
+sets the individual user for feedback/flag scoping; the former sets the entitlement sharing unit.
+
+Your **own backend** reads the entitlement by verifying the JWT against Grantiva's public JWKS
+(`/.well-known/jwks.json`, RS256) and reading `custom_claims.subscription` — no API key required.
+
 ## Push Notifications
 
 Register the device's APNs token so the backend can subscribe it to feedback threads

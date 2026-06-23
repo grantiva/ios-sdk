@@ -27,6 +27,12 @@ internal struct AttestationRequest: Codable {
     /// mid-billing-period by the self-heal path. The raw identifier is never
     /// transmitted — only its hash.
     let deviceFingerprint: String?
+
+    /// App-owned entitlement sharing-unit id (e.g. a family/household id). Links this device to
+    /// a `Subject` server-side so the org's subscription entitlement is projected into the JWT as
+    /// `custom_claims.subscription`. Optional. The same value is used as the Apple StoreKit
+    /// `appAccountToken` and the Stripe Checkout `client_reference_id`.
+    let subjectId: String?
 }
 
 internal struct AttestationResponse: Codable {
@@ -60,6 +66,9 @@ internal struct AssertionRefreshRequest: Codable {
     let assertion: String      // base64-encoded CBOR assertion from DCAppAttestService
     let clientDataHash: String // base64-encoded SHA256(challenge.utf8)
     let challenge: String      // raw challenge string for server-side validation
+    /// Optional sharing-unit id (see `AttestationRequest.subjectId`). When omitted the backend
+    /// keeps the device's existing Subject link, so the subscription claim still rides the token.
+    let subjectId: String?
 }
 
 internal struct AssertionRefreshResponse: Codable {

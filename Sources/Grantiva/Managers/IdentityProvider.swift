@@ -9,6 +9,15 @@ internal final class IdentityProvider: @unchecked Sendable {
     /// The full user context, or `nil` if not identified.
     private(set) var userContext: UserContext?
 
+    /// The entitlement sharing-unit id (e.g. a family/household id), or `nil` if unset.
+    ///
+    /// Distinct from `userId`: a sharing unit can contain several users (e.g. a family where
+    /// one member pays and everyone is entitled). Sent to Grantiva at attest/refresh so the
+    /// device links to its `Subject` and inherits the subscription claim. The host app must use
+    /// the SAME value as the Apple StoreKit `appAccountToken` and the Stripe Checkout
+    /// `client_reference_id`.
+    private(set) var subjectId: String?
+
     /// The developer-provided user ID, or `nil` if not identified.
     var userId: String? {
         userContext?.userId
@@ -54,6 +63,15 @@ internal final class IdentityProvider: @unchecked Sendable {
         userContext = nil
         if let previous = previous {
             Logger.info("Identity cleared (was: \(previous))")
+        }
+    }
+
+    func setSubjectId(_ subjectId: String?) {
+        self.subjectId = subjectId
+        if let subjectId {
+            Logger.info("Subject id set: \(subjectId)")
+        } else {
+            Logger.info("Subject id cleared")
         }
     }
 }

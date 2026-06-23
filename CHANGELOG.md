@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.1.0 — 2026-06-22
+
+### Features
+
+- Subscription entitlements: new `setSubjectId(_:)` / `clearSubjectId()` / `subjectId` API to associate a device with an entitlement **sharing unit** (e.g. a family/household). The id is sent on attestation and assertion-refresh requests so the backend links the device to its `Subject` and projects `custom_claims.subscription` into the JWT — letting one paying member entitle every device in the unit. Use the same value as the Apple StoreKit `appAccountToken` and the Stripe Checkout `client_reference_id`. Optional and backward compatible; distinct from `identify(_:)` (which scopes the individual user for feedback/flags). See the Subscriptions section in the README.
+
+---
+
 ## 2.0.6 — 2026-06-10
 
 ### Bug Fixes
