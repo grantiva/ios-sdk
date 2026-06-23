@@ -7,6 +7,12 @@ internal struct CreateFeatureRequestBody: Codable {
     let description: String
     let submitterId: String
     let deviceHash: String
+    /// Optional APNs device token. When set (and the org has a linked push app),
+    /// the backend subscribes this device to the new feature's comment thread.
+    let pushToken: String?
+    /// APNs environment for `pushToken` ("sandbox"/"production"). Required by the
+    /// server whenever `pushToken` is present so it routes via the matching host.
+    let pushEnvironment: String?
 }
 
 internal struct VoteRequestBody: Codable {
@@ -17,6 +23,12 @@ internal struct VoteRequestBody: Codable {
 internal struct CreateCommentBody: Codable {
     let authorId: String
     let body: String
+    /// Optional APNs device token. When set (and the org has a linked push app),
+    /// the backend subscribes this device to the feature's comment thread so it
+    /// receives a push when an admin replies.
+    let pushToken: String?
+    /// APNs environment for `pushToken` ("sandbox"/"production").
+    let pushEnvironment: String?
 }
 
 internal struct FeatureRequestResponse: Codable {

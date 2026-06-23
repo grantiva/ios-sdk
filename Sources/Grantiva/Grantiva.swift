@@ -12,6 +12,7 @@ public class Grantiva {
     private let teamId: String
     private let configuration: GrantivaConfiguration
     internal let identity: IdentityProvider
+    internal let pushTokens: PushTokenStore
 
     // Background/foreground lifecycle observers (iOS only)
     private var lifecycleObservers: [NSObjectProtocol] = []
@@ -29,7 +30,7 @@ public class Grantiva {
             teamId: teamId,
             getToken: { [tokenManager] in tokenManager.getStoredToken()?.token }
         )
-        return FeedbackService(apiClient: feedbackClient, identity: identity)
+        return FeedbackService(apiClient: feedbackClient, identity: identity, pushTokens: pushTokens)
     }()
 
     /// Lazy-initialized feature flag service for remote configuration.
@@ -59,6 +60,7 @@ public class Grantiva {
             : .default
         self.configuration = config
         self.identity = IdentityProvider()
+        self.pushTokens = PushTokenStore()
         self.apiClient = GrantivaAPIClient(configuration: config, teamId: teamId)
         self.keyManager = KeyManager()
         self.attestationManager = AttestationManager(teamId: teamId)
@@ -185,6 +187,68 @@ public class Grantiva {
     /// The current entitlement sharing-unit id, or `nil` if unset.
     public var subjectId: String? {
         identity.subjectId
+    }
+
+    // MARK: - Push Notifications
+
+    /// Register the device's APNs push token with the SDK.
+    ///
+    /// Apple delivers the token to your `UIApplicationDelegate`'s
+    /// `application(_:didRegisterForRemoteNotificationsWithDeviceToken:)` — forward
+    /// the raw `Data` here. Once set, the token is attached to feedback submissions and
+    /// comments so the backend subscribes this device to those threads and pushes it
+    /// when an admin replies. (Requires the org to have a linked push app; otherwise
+    /// it's silently ignored server-side.)
+    ///
+    /// ```swift
+    /// func application(_ app: UIApplication,
+    ///                  didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
+    ///     grantiva.setPushToken(deviceToken)
+    /// }
+    /// ```
+    ///
+    /// - Parameters:
+    ///   - deviceToken: The raw token `Data` from `didRegisterForRemoteNotificationsWithDeviceToken`.
+    ///   - environment: The APNs environment the token belongs to. Defaults to
+    ///     `PushEnvironment.detected`, which reads the provisioning profile and falls
+    ///     back to the build configuration. Pass an explicit value if your pipeline
+    ///     doesn't fit those heuristics.
+    public func setPushToken(_ deviceToken: Data, environment: PushEnvironment = .detected) {
+        let hex = deviceToken.map { String(format: "%02x", $0) }.joined()
+        setPushToken(hex, environment: environment)
+    }
+
+    /// Register an already hex-encoded APNs push token.
+    ///
+    /// Prefer the `Data` overload with the raw token from Apple; use this only if you've
+    /// already converted the token to a hex string.
+    ///
+    /// - Parameters:
+    ///   - hexToken: The lowercase hex-encoded device token.
+    ///   - environment: The APNs environment the token belongs to. Defaults to `.detected`.
+    public func setPushToken(_ hexToken: String, environment: PushEnvironment = .detected) {
+        let normalized = hexToken.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !normalized.isEmpty else {
+            Logger.warning("setPushToken called with an empty token — ignoring")
+            return
+        }
+        pushTokens.set(token: normalized, environment: environment)
+        Logger.info("Registered APNs push token (\(environment.rawValue))")
+    }
+
+    /// The currently registered hex-encoded APNs push token, or `nil` if none is set.
+    public var pushToken: String? {
+        pushTokens.token
+    }
+
+    /// Clear the registered push token.
+    ///
+    /// Call this when the app unregisters for remote notifications or the user opts out.
+    /// Subsequent feedback submissions and comments will no longer subscribe the device
+    /// to threads.
+    public func clearPushToken() {
+        pushTokens.clear()
+        Logger.info("Cleared APNs push token")
     }
 
     public func validateAttestation() async throws -> AttestationResult {
