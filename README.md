@@ -250,6 +250,74 @@ public enum GrantivaError: LocalizedError {
 - App Attest keys are per-device, non-exportable
 - No sensitive data in logs; all communication over TLS
 
+## Privacy Manifest
+
+The SDK ships an Apple privacy manifest at `Sources/Grantiva/PrivacyInfo.xcprivacy`. It is
+bundled as an SPM resource, so Xcode picks it up automatically and folds it into your app's
+privacy report — you do not need to copy anything into your project.
+
+### What the manifest declares
+
+`NSPrivacyTracking` is **false** and `NSPrivacyTrackingDomains` is **empty**. Grantiva does not
+track users across apps or websites owned by other companies, and does not contact any domain
+for advertising or measurement. The SDK never calls `ATTrackingManager` and never touches the
+IDFA.
+
+`NSPrivacyAccessedAPITypes` is **empty**. The SDK uses none of Apple's required-reason APIs — no
+`UserDefaults`, no file timestamp APIs, no system boot time, no disk space APIs, no active
+keyboard APIs. Credentials are stored in the Keychain, which is not a required-reason API.
+
+The following data types are declared. All of them are marked **linked to the user** (because
+`Grantiva.identify(_:)` associates a developer-supplied user id with the same requests), **not
+used for tracking**, and collected solely for **App Functionality**:
+
+| Declared type | What it actually is | Where in the code |
+|---|---|---|
+| User ID | The `userId` you pass to `identify(_:)`, sent as `submitterId` / `voterId` / `authorId`. Also the optional `subjectId` you set for entitlement sharing, sent with attestation. | `IdentityProvider`, `FeedbackAPIClient`, `NetworkModels.AttestationRequest` |
+| Device ID | A SHA-256 device fingerprint sent with attestation; a SHA-256 device hash sent with feedback writes for spam prevention; the raw vendor identifier (`identifierForVendor` on iOS, `IOPlatformSerialNumber` on macOS) sent with the heartbeat **only in API-key / simulator mode**; the APNs push token you supply via `setPushToken(_:environment:)`, sent so the backend can subscribe the device to a feedback thread. | `PlatformSupport`, `DeviceHasher`, `HeartbeatAPIClient`, `PushTokenStore` |
+| Email Address | Only the optional `email` argument to `feedback.submitTicket(subject:body:email:)`. Nothing is read from the device — the value comes from your UI. If you never pass an email, none is transmitted. | `FeedbackService.submitTicket` |
+| Customer Support | The subject and message bodies of support tickets and ticket replies, typed by the user. | `FeedbackService.submitTicket` / `reply(to:body:)` |
+| Other User Content | Feature request titles and descriptions, and comments on feature requests, typed by the user. | `FeedbackService.submitFeatureRequest` / `addComment(to:body:)` |
+| Product Interaction | Periodic heartbeats carrying app state (`active` / `background`), feature-request votes, and "release note seen" marks. | `HeartbeatManager`, `FeedbackService.vote`, `WhatsNewAPIClient.markSeen` |
+| Other Data Types | Device model, OS version, app version and build number, and platform, sent with attestation so the backend can validate and risk-score the device. | `PlatformSupport`, `NetworkModels.AttestationRequest` |
+
+### What the SDK does *not* collect
+
+- **No analytics.** There is no analytics module in this SDK today, and the manifest deliberately
+  does not declare analytics collection.
+- **No location, contacts, photos, health, or financial data.**
+- **No advertising identifier, and no cross-app tracking.**
+- **Custom user properties stay on the device.** The `properties` dictionary on `UserContext` is
+  held in memory for future targeting and is never transmitted by any current code path. Only the
+  `userId` leaves the device.
+- **Crash and performance data are not collected.**
+
+### What you must add to your own app's privacy disclosure
+
+The SDK's manifest covers what the SDK does. App Store Connect's **App Privacy** questionnaire is
+separate, and you must answer it for your app as a whole. Concretely, if you use these Grantiva
+features, disclose the corresponding items:
+
+1. **Always** — you are collecting a **Device ID** for App Functionality (app functionality
+   covers security, authentication and fraud prevention). Not used for tracking.
+2. **If you call `identify(_:)`** — you are collecting a **User ID** for App Functionality.
+3. **If you ship feedback or support UI** (including the drop-in views in `GrantivaUI`) — you are
+   collecting **User Content** and **Customer Support** data for App Functionality. Anything your
+   users type in a feature request, comment, or ticket is sent to Grantiva and stored there.
+4. **If your support form has an email field** (the `GrantivaUI` `SubmitTicketView` does) — you
+   are collecting an **Email Address** for App Functionality. Whatever your users type there is
+   transmitted verbatim; the SDK does not validate, redact, or hash it.
+5. **Never check "Used for Tracking"** on Grantiva's account — the SDK does not track, and its
+   manifest asserts so.
+
+Two things worth telling your users plainly in your privacy policy: free-text feedback is stored
+by Grantiva on your behalf and is visible to your team in the Grantiva dashboard, and support
+tickets are correspondence — treat them as such, and don't prompt users for payment details,
+government IDs, or health information inside a ticket body.
+
+Grantiva's own handling of this data is described at
+[grantiva.io/privacy](https://grantiva.io/privacy).
+
 ## Pricing
 
 | Plan | MAD / month | Apps | Custom Claims | Support |
