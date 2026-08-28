@@ -218,7 +218,7 @@ public enum GrantivaError: LocalizedError {
 
 | Plan | MAD / month | Apps | Custom Claims | Support |
 |------|-------------|------|---------------|---------|
-| **Free** | 1,000 | 1 | — | Community |
+| **Free** | 1,000 | 2 | — | Community |
 | **Pro** | 25,000 | 3 | 5 | Email |
 | **Business** | 250,000 | 10 | 10 | Priority |
 | **Enterprise** | Unlimited | Unlimited | 20 | Dedicated + SLA |
