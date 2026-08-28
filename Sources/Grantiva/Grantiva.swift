@@ -49,6 +49,25 @@ public class Grantiva {
         return FlagService(apiClient: flagClient, identity: identity)
     }()
 
+    /// Lazy-initialized "What's New" service for version-targeted release notes.
+    ///
+    /// ```swift
+    /// for note in try await grantiva.whatsNew.getReleaseNotes() {
+    ///     show(note)
+    ///     try await grantiva.whatsNew.markSeen(note.id)
+    /// }
+    /// ```
+    ///
+    /// Always returns an empty list in the iOS Simulator — see ``WhatsNewService``.
+    public private(set) lazy var whatsNew: WhatsNewService = {
+        let whatsNewClient = WhatsNewAPIClient(
+            configuration: configuration,
+            teamId: teamId,
+            getToken: { [tokenManager] in tokenManager.getStoredToken()?.token }
+        )
+        return WhatsNewService(apiClient: whatsNewClient)
+    }()
+
     /// - Parameters:
     ///   - teamId: Your Apple Team ID.
     ///   - apiKey: Optional API key for simulator / development use where App Attest is unavailable.
