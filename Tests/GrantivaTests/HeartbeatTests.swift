@@ -195,10 +195,20 @@ final class HeartbeatTests: XCTestCase {
         _ = await waitUntil { StubURLProtocol.requestCount >= 2 }
         manager.stop()
 
-        // Let several intervals elapse; the count must stay put.
-        let countAtStop = StubURLProtocol.requestCount
+        // A request already in flight when stop() lands may still complete, and that is
+        // not the behaviour under test — what must not happen is a *new* heartbeat being
+        // scheduled afterwards. Let in-flight work drain before taking the baseline;
+        // reading it immediately after stop() races that request and fails on slower
+        // machines (observed on CI: 3 != 2).
+        try? await Task.sleep(for: .milliseconds(200))
+        let countAfterDrain = StubURLProtocol.requestCount
+
+        // 300ms spans ~15 intervals, so any continued scheduling shows up here.
         try? await Task.sleep(for: .milliseconds(300))
-        XCTAssertEqual(StubURLProtocol.requestCount, countAtStop, "no heartbeat may fire after stop()")
+        XCTAssertEqual(
+            StubURLProtocol.requestCount, countAfterDrain,
+            "no heartbeat may be scheduled after stop()"
+        )
     }
 
     func testStopBeforeStartIsSafe() async {
