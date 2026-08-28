@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+### Features
+
+- What's New: new `grantiva.whatsNew` service delivering version-targeted release notes — `getReleaseNotes(forceRefresh:)`, `markSeen(_:)`, and `clearCache()`, plus the `ReleaseNote` model. The backend returns only the notes this device should see (published, for a version the device upgraded *past*, not yet marked seen), newest first; the device's app version is read server-side from its attested profile, so there is nothing to send or configure. Notes are cached in-memory for 5 minutes by default. Additive and backward compatible. **Unattested clients (iOS Simulator, API-key builds) always receive an empty list** — release notes are keyed to the attested device profile, which a simulator never creates.
+
+---
+
 ## 2.1.0 — 2026-06-22
 
 ### Features
