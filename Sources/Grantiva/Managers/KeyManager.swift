@@ -9,25 +9,25 @@ internal class KeyManager {
     
     func getOrCreateKeyId() async throws -> String {
         if let existingKeyId = getStoredKeyId() {
-            print("[KeyManager] Found existing key ID: \(existingKeyId)")
+            Logger.debug("[KeyManager] Existing key ID found in keychain")
             return existingKeyId
         }
         
-        print("[KeyManager] No existing key ID found, generating new one...")
+        Logger.debug("[KeyManager] No existing key ID found, generating new one")
         
         guard DCAppAttestService.shared.isSupported else {
-            print("[KeyManager] ERROR: App Attest not supported")
+            Logger.error("[KeyManager] App Attest is not supported on this device")
             throw GrantivaError.attestationNotAvailable
         }
         
         do {
-            print("[KeyManager] Calling DCAppAttestService.generateKey()...")
+            Logger.debug("[KeyManager] Calling DCAppAttestService.generateKey()")
             let keyId = try await DCAppAttestService.shared.generateKey()
-            print("[KeyManager] Generated new key ID: \(keyId)")
+            Logger.debug("[KeyManager] Generated new key ID")
             try saveKeyId(keyId)
             return keyId
         } catch {
-            print("[KeyManager] ERROR generating key: \(error)")
+            Logger.error("[KeyManager] Failed to generate key: \(error)")
             throw GrantivaError.keyGenerationFailed
         }
     }
@@ -47,7 +47,7 @@ internal class KeyManager {
 
         let status = SecItemAdd(query as CFDictionary, nil)
         if status != errSecSuccess {
-            print("[KeyManager] ERROR: Failed to save key ID to Keychain (OSStatus \(status)) — key will be lost")
+            Logger.error("[KeyManager] Failed to save key ID to Keychain (OSStatus \(status)) — key will be lost")
             throw GrantivaError.keyGenerationFailed
         }
     }
@@ -87,7 +87,7 @@ internal class KeyManager {
         SecItemDelete(query as CFDictionary)
         let status = SecItemAdd(query as CFDictionary, nil)
         if status != errSecSuccess {
-            print("[KeyManager] Failed to mark key as attested: \(status)")
+            Logger.error("[KeyManager] Failed to mark key as attested (OSStatus \(status))")
         }
     }
 
@@ -121,7 +121,7 @@ internal class KeyManager {
     }
 
     func clearStoredKeyId() {
-        print("[KeyManager] Clearing stored key ID...")
+        Logger.debug("[KeyManager] Clearing stored key ID")
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: keychainService,
@@ -130,11 +130,11 @@ internal class KeyManager {
         
         let status = SecItemDelete(query as CFDictionary)
         if status == errSecSuccess {
-            print("[KeyManager] Successfully cleared key ID")
+            Logger.debug("[KeyManager] Successfully cleared key ID")
         } else if status == errSecItemNotFound {
-            print("[KeyManager] No key ID to clear")
+            Logger.debug("[KeyManager] No key ID to clear")
         } else {
-            print("[KeyManager] Error clearing key ID: \(status)")
+            Logger.error("[KeyManager] Failed to clear key ID (OSStatus \(status))")
         }
 
         // Also clear the attested flag so the next key goes through full attestation

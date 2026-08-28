@@ -65,7 +65,7 @@ internal final class TokenManager: @unchecked Sendable {
         
         let status = SecItemAdd(query as CFDictionary, nil)
         if status != errSecSuccess {
-            print("Failed to save \(key) to keychain: \(status)")
+            Logger.error("Failed to save \(key) to keychain (OSStatus \(status))")
         }
     }
     
