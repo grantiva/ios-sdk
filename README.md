@@ -95,6 +95,42 @@ public enum RiskCategory: String {
 }
 ```
 
+### What your backend receives
+
+`DeviceIntelligence` above is the **HTTP response body** the SDK decodes. Separately, the SDK holds an
+RS256-signed **JWT** — forward that as `Authorization: Bearer <token>` and your backend verifies it
+against `https://api.grantiva.io/.well-known/jwks.json`.
+
+The two are not the same shape. The JWT is flat and `snake_case`, and on paid plans it carries signed
+device intelligence:
+
+```json
+{
+  "sub": "<App Attest key id>",
+  "iat": 1772107200,
+  "exp": 1772110800,
+  "iss": "<your organization's issuer>",
+  "aud": "<your organization's audience>",
+  "team_id": "ABBM6U9RM5",
+  "bundle_id": "com.acme.app",
+  "risk_score": 12,
+  "device_integrity": "high",
+  "jailbreak_detected": false,
+  "attestation_count": 47,
+  "custom_claims": { "user_tier": "premium" }
+}
+```
+
+Three things to know before you write the verification code:
+
+- There is **no `risk_category` claim in the JWT** — that field exists only in the response body above.
+- `risk_score` is a **snapshot from when the token was issued**, and tokens live 1 hour by default. Treat
+  it as advisory; re-attest before high-stakes actions.
+- Which claims are present depends on your plan. The Free plan token carries no device intelligence.
+
+Full per-plan claim table, decoded examples, and Node/Python verification code:
+**https://docs.grantiva.io/concepts/jwt-claims**
+
 ## Subscriptions
 
 Grantiva can attach a subscription entitlement to a **sharing unit** (e.g. a family/household)
