@@ -3,7 +3,10 @@ import XCTest
 
 /// A `URLProtocol` stub that plays back a scripted list of outcomes and counts
 /// how many requests the client actually issued. No external dependencies.
-final class StubURLProtocol: URLProtocol {
+/// Outcome-queue stub used only by the retry-wiring tests. Distinct from the
+/// richer request-recording `StubURLProtocol` in Support/, which these tests do
+/// not need — kept separate so neither suite constrains the other's API.
+final class RetryStubURLProtocol: URLProtocol {
     enum Outcome {
         case failure(URLError.Code)
         case response(statusCode: Int, body: Data)
@@ -43,7 +46,7 @@ final class StubURLProtocol: URLProtocol {
     override func stopLoading() {}
 
     override func startLoading() {
-        switch StubURLProtocol.nextOutcome() {
+        switch RetryStubURLProtocol.nextOutcome() {
         case .failure(let code):
             client?.urlProtocol(self, didFailWithError: URLError(code))
         case .response(let statusCode, let body):
@@ -73,7 +76,7 @@ final class RetryWiringTests: XCTestCase {
         return GrantivaAPIClient(
             configuration: config,
             teamId: "TEAM123",
-            protocolClasses: [StubURLProtocol.self]
+            protocolClasses: [RetryStubURLProtocol.self]
         )
     }
 
@@ -103,7 +106,7 @@ final class RetryWiringTests: XCTestCase {
 
     /// The challenge GET is idempotent, so a transient transport failure is retried.
     func testRequestChallengeRetriesTransientTransportFailure() async throws {
-        StubURLProtocol.setUp(outcomes: [
+        RetryStubURLProtocol.setUp(outcomes: [
             .failure(.networkConnectionLost),
             .failure(.timedOut),
             .response(statusCode: 200, body: challengeBody)
@@ -112,13 +115,13 @@ final class RetryWiringTests: XCTestCase {
         let response = try await makeClient().requestChallenge()
 
         XCTAssertEqual(response.challenge, "abc123")
-        XCTAssertEqual(StubURLProtocol.requestCount, 3, "Expected two retries before success")
+        XCTAssertEqual(RetryStubURLProtocol.requestCount, 3, "Expected two retries before success")
     }
 
     /// A terminal server error must fail on the first attempt — no retries.
     func testRequestChallengeDoesNotRetryTerminalServerError() async {
         let body = #"{"error":true,"reason":"invalid bundle id"}"#.data(using: .utf8)!
-        StubURLProtocol.setUp(outcomes: [.response(statusCode: 400, body: body)])
+        RetryStubURLProtocol.setUp(outcomes: [.response(statusCode: 400, body: body)])
 
         do {
             _ = try await makeClient().requestChallenge()
@@ -132,12 +135,12 @@ final class RetryWiringTests: XCTestCase {
             XCTFail("Expected GrantivaError, got \(error)")
         }
 
-        XCTAssertEqual(StubURLProtocol.requestCount, 1, "Terminal errors must not be retried")
+        XCTAssertEqual(RetryStubURLProtocol.requestCount, 1, "Terminal errors must not be retried")
     }
 
     /// Retries are bounded by `configuration.retryAttempts`.
     func testRequestChallengeStopsAfterConfiguredAttempts() async {
-        StubURLProtocol.setUp(outcomes: [.failure(.notConnectedToInternet)])
+        RetryStubURLProtocol.setUp(outcomes: [.failure(.notConnectedToInternet)])
 
         do {
             _ = try await makeClient(retryAttempts: 2).requestChallenge()
@@ -146,16 +149,16 @@ final class RetryWiringTests: XCTestCase {
             // expected
         }
 
-        XCTAssertEqual(StubURLProtocol.requestCount, 2)
+        XCTAssertEqual(RetryStubURLProtocol.requestCount, 2)
     }
 
     /// `retryAttempts: 1` means no retry at all.
     func testRequestChallengeWithSingleAttemptIssuesOneRequest() async {
-        StubURLProtocol.setUp(outcomes: [.failure(.timedOut)])
+        RetryStubURLProtocol.setUp(outcomes: [.failure(.timedOut)])
 
         _ = try? await makeClient(retryAttempts: 1).requestChallenge()
 
-        XCTAssertEqual(StubURLProtocol.requestCount, 1)
+        XCTAssertEqual(RetryStubURLProtocol.requestCount, 1)
     }
 
     // MARK: - Retry classification
@@ -179,17 +182,17 @@ final class RetryWiringTests: XCTestCase {
     /// Attestation consumes a one-time challenge and a once-per-lifetime App Attest
     /// key, so it must issue exactly one request even for a retryable transport error.
     func testValidateAttestationIsNotRetried() async {
-        StubURLProtocol.setUp(outcomes: [.failure(.networkConnectionLost)])
+        RetryStubURLProtocol.setUp(outcomes: [.failure(.networkConnectionLost)])
 
         _ = try? await makeClient().validateAttestation(makeAttestationRequest())
 
-        XCTAssertEqual(StubURLProtocol.requestCount, 1, "Attestation must never be retried")
+        XCTAssertEqual(RetryStubURLProtocol.requestCount, 1, "Attestation must never be retried")
     }
 
     /// Assertion refresh carries a monotonic signature counter; a replay would be
     /// rejected server-side, so it must not be retried either.
     func testRefreshWithAssertionIsNotRetried() async {
-        StubURLProtocol.setUp(outcomes: [.failure(.timedOut)])
+        RetryStubURLProtocol.setUp(outcomes: [.failure(.timedOut)])
 
         let request = AssertionRefreshRequest(
             keyId: "KEY",
@@ -200,6 +203,6 @@ final class RetryWiringTests: XCTestCase {
         )
         _ = try? await makeClient().refreshWithAssertion(request)
 
-        XCTAssertEqual(StubURLProtocol.requestCount, 1, "Assertion refresh must never be retried")
+        XCTAssertEqual(RetryStubURLProtocol.requestCount, 1, "Assertion refresh must never be retried")
     }
 }

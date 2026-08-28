@@ -16,6 +16,14 @@ internal final class HeartbeatAPIClient: @unchecked Sendable {
         self.session = URLSession(configuration: sessionConfig)
     }
 
+    /// Internal seam: injects a pre-built `URLSession` so tests can install a stub
+    /// `URLProtocol`. Not part of the public API.
+    init(configuration: GrantivaConfiguration, teamId: String, session: URLSession) {
+        self.configuration = configuration
+        self.teamId = teamId
+        self.session = session
+    }
+
     /// Send a heartbeat to the server.
     /// - Parameters:
     ///   - token: JWT token from attestation (nil in API key mode)

@@ -11,12 +11,20 @@ internal final class HeartbeatManager: @unchecked Sendable {
     private let getDeviceId: () -> String?
 
     private var timerTask: Task<Void, Never>?
-    private let interval: TimeInterval = 120
+    private let interval: TimeInterval
 
-    init(apiClient: HeartbeatAPIClient, getToken: @escaping () -> String?, getDeviceId: @escaping () -> String?) {
+    /// - Parameter interval: seconds between heartbeats. Defaults to 120; overridable
+    ///   at `internal` visibility only so tests don't have to wait two minutes.
+    init(
+        apiClient: HeartbeatAPIClient,
+        getToken: @escaping () -> String?,
+        getDeviceId: @escaping () -> String?,
+        interval: TimeInterval = 120
+    ) {
         self.apiClient = apiClient
         self.getToken = getToken
         self.getDeviceId = getDeviceId
+        self.interval = interval
     }
 
     /// Start sending periodic heartbeats.

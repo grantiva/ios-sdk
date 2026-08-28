@@ -19,6 +19,14 @@ internal class GrantivaAPIClient {
         }
         self.session = URLSession(configuration: sessionConfig)
     }
+
+    /// Internal seam: injects a pre-built `URLSession` so tests can install a stub
+    /// `URLProtocol`. Not part of the public API; production code uses `init(configuration:teamId:)`.
+    init(configuration: GrantivaConfiguration = .default, teamId: String, session: URLSession) {
+        self.configuration = configuration
+        self.teamId = teamId
+        self.session = session
+    }
     
     /// Requests a fresh attestation challenge.
     ///
