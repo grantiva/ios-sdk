@@ -57,28 +57,28 @@ internal class GrantivaAPIClient {
             let jsonData = try JSONEncoder().encode(request)
             httpRequest.httpBody = jsonData
             
-            print("[Grantiva API] Sending request to: \(url)")
-            print("[Grantiva API] Headers: X-Bundle-ID=\(getBundleId()), X-Team-ID=\(teamId)")
-            print("[Grantiva API] Request body size: \(jsonData.count) bytes")
+            Logger.debug("[Grantiva API] Sending request to: \(url)")
+            Logger.debug("[Grantiva API] Headers: X-Bundle-ID=\(getBundleId()), X-Team-ID=\(teamId)")
+            Logger.debug("[Grantiva API] Request body size: \(jsonData.count) bytes")
             
             let (data, response) = try await session.data(for: httpRequest)
             
             guard let httpResponse = response as? HTTPURLResponse else {
-                print("[Grantiva API] Invalid response - not HTTP")
+                Logger.error("[Grantiva API] Invalid response — not an HTTP response")
                 throw GrantivaError.invalidResponse
             }
             
-            print("[Grantiva API] Response status code: \(httpResponse.statusCode)")
+            Logger.debug("[Grantiva API] Response status code: \(httpResponse.statusCode)")
             
             guard httpResponse.statusCode == 200 else {
                 throw parseServerError(from: data, statusCode: httpResponse.statusCode)
             }
             
             let attestationResponse = try JSONDecoder().decode(AttestationResponse.self, from: data)
-            print("[Grantiva API] Successfully decoded attestation response")
+            Logger.debug("[Grantiva API] Successfully decoded attestation response")
             return attestationResponse
         } catch {
-            print("[Grantiva API] Error: \(error)")
+            Logger.error("[Grantiva API] Attestation validation failed: \(error)")
             if error is GrantivaError {
                 throw error
             } else {
@@ -131,8 +131,11 @@ internal class GrantivaAPIClient {
             }
 
             guard httpResponse.statusCode == 200 else {
-                let body = String(data: data, encoding: .utf8) ?? ""
-                print("[Grantiva API] Refresh failed (\(httpResponse.statusCode)): \(body)")
+                Logger.error("[Grantiva API] Refresh failed (\(httpResponse.statusCode))")
+                if let body = String(data: data, encoding: .utf8), !body.isEmpty {
+                    // Response bodies can echo request context; keep them at .debug only.
+                    Logger.debug("[Grantiva API] Refresh error body: \(body)")
+                }
                 // 409 = backend has invalidated the stored attestation row and is asking
                 // the SDK to re-attest. Surface a distinct error so the caller can self-heal.
                 if httpResponse.statusCode == 409 {
