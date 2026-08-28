@@ -31,7 +31,9 @@ internal class RetryManager {
         throw lastError ?? GrantivaError.networkError(NSError(domain: "RetryFailed", code: -1))
     }
     
-    private static func shouldRetry(error: Error) -> Bool {
+    /// Exposed at `internal` visibility (rather than `private`) so the retry policy
+    /// can be unit-tested directly. Not part of the public API.
+    static func shouldRetry(error: Error) -> Bool {
         if let grantivaError = error as? GrantivaError {
             switch grantivaError {
             case .networkError:
@@ -55,7 +57,9 @@ internal class RetryManager {
         return false
     }
     
-    private static func calculateDelay(attempt: Int, baseDelay: TimeInterval) -> TimeInterval {
+    /// Exposed at `internal` visibility (rather than `private`) so backoff progression
+    /// can be unit-tested directly. Not part of the public API.
+    static func calculateDelay(attempt: Int, baseDelay: TimeInterval) -> TimeInterval {
         let exponentialDelay = baseDelay * pow(2.0, Double(attempt - 1))
         let jitter = Double.random(in: 0.0...0.1) * exponentialDelay
         return min(exponentialDelay + jitter, 30.0)

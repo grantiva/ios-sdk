@@ -14,6 +14,14 @@ internal class GrantivaAPIClient {
         sessionConfig.timeoutIntervalForResource = configuration.timeout
         self.session = URLSession(configuration: sessionConfig)
     }
+
+    /// Internal seam: injects a pre-built `URLSession` so tests can install a stub
+    /// `URLProtocol`. Not part of the public API; production code uses `init(configuration:teamId:)`.
+    init(configuration: GrantivaConfiguration = .default, teamId: String, session: URLSession) {
+        self.configuration = configuration
+        self.teamId = teamId
+        self.session = session
+    }
     
     func requestChallenge() async throws -> ChallengeResponse {
         let url = URL(string: "\(configuration.baseURL)/api/v1/attestation/challenge")!
