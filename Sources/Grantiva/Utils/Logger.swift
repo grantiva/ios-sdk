@@ -18,21 +18,19 @@ internal class Logger {
     static func log(_ message: String, level: LogLevel = .info, file: String = #file, function: String = #function, line: Int = #line) {
         let fileName = URL(fileURLWithPath: file).lastPathComponent
         let logMessage = "[\(fileName):\(line)] \(function) - \(message)"
-        
-        if #available(iOS 14.0, macOS 11.0, *) {
-            switch level {
-            case .debug:
-                osLogger.debug("\(logMessage)")
-            case .info:
-                osLogger.info("\(logMessage)")
-            case .warning:
-                osLogger.warning("\(logMessage)")
-            case .error:
-                osLogger.error("\(logMessage)")
-            }
-        } else {
-            let levelString = levelToString(level)
-            print("[\(Date())] [\(levelString)] \(logMessage)")
+
+        // The package requires iOS 18 / macOS 15, so os.Logger is always available.
+        // Never fall back to print(): print() writes unconditionally to the device
+        // console in release builds, which is how secrets leaked previously.
+        switch level {
+        case .debug:
+            osLogger.debug("\(logMessage)")
+        case .info:
+            osLogger.info("\(logMessage)")
+        case .warning:
+            osLogger.warning("\(logMessage)")
+        case .error:
+            osLogger.error("\(logMessage)")
         }
     }
     
@@ -50,18 +48,5 @@ internal class Logger {
     
     static func error(_ message: String, file: String = #file, function: String = #function, line: Int = #line) {
         log(message, level: .error, file: file, function: function, line: line)
-    }
-    
-    private static func levelToString(_ level: LogLevel) -> String {
-        switch level {
-        case .debug:
-            return "DEBUG"
-        case .info:
-            return "INFO"
-        case .warning:
-            return "WARNING"
-        case .error:
-            return "ERROR"
-        }
     }
 }

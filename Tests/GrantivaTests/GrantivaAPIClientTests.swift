@@ -197,7 +197,9 @@ final class GrantivaAPIClientTests: XCTestCase {
     }
 
     func testChallengeTransportFailureMapsToNetworkError() async {
-        StubURLProtocol.enqueue(.failure(URLError(.notConnectedToInternet)))
+        // requestChallenge is retried, so a single enqueued failure would be followed by
+        // the fallback 200 on the next attempt. Fail every attempt so the error surfaces.
+        StubURLProtocol.setFallback(.failure(URLError(.notConnectedToInternet)))
 
         do {
             _ = try await makeClient().requestChallenge()
@@ -223,18 +225,21 @@ final class GrantivaAPIClientTests: XCTestCase {
         }
     }
 
-    // MARK: - No retry (documents current behaviour)
+    // MARK: - Retry behaviour
 
-    /// `GrantivaAPIClient` does **not** wrap its calls in `RetryManager`, so a
-    /// retryable transport failure results in exactly one network round trip.
-    /// This pins the current contract; if retry is wired up, this test must change
-    /// alongside it (and would otherwise catch an accidental request amplification).
-    func testRetryableTransportFailureIssuesExactlyOneRequest() async {
+    /// `requestChallenge` is idempotent, so it is wrapped in `RetryManager`: a retryable
+    /// transport failure is re-issued up to `configuration.retryAttempts` times.
+    /// The attestation and refresh paths are deliberately *not* retried — see
+    /// `RetryWiringTests` for those, which assert exactly one request.
+    func testRetryableTransportFailureIsRetriedOnTheChallengeEndpoint() async {
         StubURLProtocol.setFallback(.failure(URLError(.timedOut)))
 
         _ = try? await makeClient().requestChallenge()
 
-        XCTAssertEqual(StubURLProtocol.requestCount, 1, "client currently performs no retries")
+        XCTAssertEqual(
+            StubURLProtocol.requestCount, 3,
+            "a retryable transport failure should exhaust the default 3 attempts"
+        )
     }
 
     func testTerminalServerErrorIssuesExactlyOneRequest() async {

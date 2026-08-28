@@ -50,9 +50,11 @@ final class RetryManagerTests: XCTestCase {
         XCTAssertFalse(RetryManager.shouldRetry(error: GrantivaError.limitExceeded(limit: 1000, current: 1001)))
     }
 
-    func testShouldNotRetryRateLimited() {
-        // Documents current policy: `.rateLimited` falls into the `default` arm.
-        XCTAssertFalse(RetryManager.shouldRetry(error: GrantivaError.rateLimited))
+    func testShouldRetryRateLimited() {
+        // 429 is transient by definition and the caller backs off exponentially, so it is
+        // retryable — deliberately distinct from `.limitExceeded` (the monthly MAD quota),
+        // which is exhausted for the billing period and is asserted non-retryable above.
+        XCTAssertTrue(RetryManager.shouldRetry(error: GrantivaError.rateLimited))
     }
 
     func testShouldRetryTransientURLErrors() {
