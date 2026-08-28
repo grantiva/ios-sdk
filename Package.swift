@@ -19,7 +19,10 @@ let package = Package(
         .target(
             name: "Grantiva",
             dependencies: [],
-            path: "Sources/Grantiva"
+            path: "Sources/Grantiva",
+            resources: [
+                .copy("PrivacyInfo.xcprivacy")
+            ]
         ),
         .testTarget(
             name: "GrantivaTests",
