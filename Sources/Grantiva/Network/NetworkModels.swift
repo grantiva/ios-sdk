@@ -80,4 +80,7 @@ internal struct AssertionRefreshRequest: Codable {
 internal struct AssertionRefreshResponse: Codable {
     let token: String
     let expiresAt: String
+    /// Custom claims projected into the refreshed JWT. Optional so the SDK keeps
+    /// working against backends that predate the field.
+    let customClaims: [String: String]?
 }

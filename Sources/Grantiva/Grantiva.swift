@@ -486,7 +486,8 @@ public class Grantiva {
             isValid: true,
             token: response.token,
             expiresAt: expiresAt,
-            deviceIntelligence: storedDeviceIntelligence(fallbackIntegrity: "asserted")
+            deviceIntelligence: storedDeviceIntelligence(fallbackIntegrity: "asserted"),
+            customClaims: response.customClaims ?? [:]
         )
     }
 

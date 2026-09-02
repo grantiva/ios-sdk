@@ -18,6 +18,7 @@
 
 - `FlagService.setCacheTTL(_:)` and `WhatsNewService.setCacheTTL(_:)` — `cacheTTL` is actor-isolated, so it could be read but never assigned from outside the actor. The setter closes that gap; the property is now `public private(set)`.
 - `DeviceIntelligence`, `RiskCategory`, `UserContext`, `DeviceContext` and `GrantivaError` are now `Sendable`; `AttestationResult` is `@unchecked Sendable`. All additive.
+- `AttestationResult.customClaims` is now populated on the assertion-refresh path too, when the backend returns `customClaims` on `POST /api/v1/attestation/refresh` (older backends: empty, as before).
 - `refreshToken()` returns the stored `DeviceIntelligence` from the last attestation instead of a placeholder when the token is still valid.
 - Removed dead code: `CustomClaimsProcessor`, `DeviceIntelligenceExtractor`'s local risk heuristics, `DeviceCompatibility.getDeviceInfo`, `KeyManager.clearAttestedFlag`, and the unused `KeyManager` inside `AttestationManager`. None were reachable from the public API.
 

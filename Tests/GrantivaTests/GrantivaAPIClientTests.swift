@@ -362,6 +362,14 @@ final class GrantivaAPIClientTests: XCTestCase {
         )
     }
 
+    func testRefreshWithAssertionDecodesCustomClaims() async throws {
+        StubURLProtocol.enqueue(.json(#"{"token":"new.jwt","expiresAt":"2026-02-01T00:00:00Z","customClaims":{"plan":"pro"}}"#))
+
+        let response = try await makeClient().refreshWithAssertion(makeRefreshRequest())
+
+        XCTAssertEqual(response.customClaims?["plan"], "pro")
+    }
+
     func testRefreshWithAssertionDecodesSuccessResponse() async throws {
         StubURLProtocol.enqueue(.json(#"{"token":"new.jwt","expiresAt":"2026-02-01T00:00:00Z"}"#))
 
@@ -369,6 +377,7 @@ final class GrantivaAPIClientTests: XCTestCase {
 
         XCTAssertEqual(response.token, "new.jwt")
         XCTAssertEqual(response.expiresAt, "2026-02-01T00:00:00Z")
+        XCTAssertNil(response.customClaims, "older backends omit customClaims; that must still decode")
 
         let request = try XCTUnwrap(StubURLProtocol.requests.first)
         XCTAssertEqual(request.method, "POST")
