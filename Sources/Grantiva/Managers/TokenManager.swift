@@ -24,6 +24,15 @@ internal final class TokenManager: @unchecked Sendable {
         return (token: token, expiresAt: expiresAt)
     }
     
+    /// The stored token, or `nil` when there is none or it is within the expiry buffer.
+    /// Background clients use this so they never send a token the server will reject.
+    func getValidToken() -> String? {
+        guard let stored = getStoredToken(), !isTokenExpired(stored.expiresAt) else {
+            return nil
+        }
+        return stored.token
+    }
+
     func isTokenExpired(_ expiresAt: Date) -> Bool {
         let bufferTime: TimeInterval = 300
         return Date().addingTimeInterval(bufferTime) >= expiresAt

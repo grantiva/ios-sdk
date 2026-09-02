@@ -9,6 +9,8 @@ public class Grantiva {
     private let attestationManager: AttestationManager
     private let tokenManager: TokenManager
     private let heartbeatManager: HeartbeatManager
+    /// Lets the heartbeat and flag stream renew an expired token on their own.
+    private let backgroundRefresher = BackgroundTokenRefresher()
     private let teamId: String
     private let configuration: GrantivaConfiguration
     internal let identity: IdentityProvider
@@ -85,10 +87,18 @@ public class Grantiva {
         self.attestationManager = AttestationManager(teamId: teamId)
         self.tokenManager = TokenManager()
         let isAPIKey = apiKey != nil
+        // In API key mode there is no JWT to renew: the key itself authenticates,
+        // so background clients get no refresh hook and fall back to the key.
+        let refresher = backgroundRefresher
+        let refreshToken: (@Sendable () async -> Bool)? = isAPIKey
+            ? nil
+            : { @Sendable in await refresher.refresh() }
+        self.backgroundRefreshToken = refreshToken
         self.heartbeatManager = HeartbeatManager(
             apiClient: HeartbeatAPIClient(configuration: config, teamId: teamId),
-            getToken: { [tokenManager] in tokenManager.getStoredToken()?.token },
-            getDeviceId: { isAPIKey ? PlatformSupport.getDeviceIdentifier() : nil }
+            getToken: { [tokenManager] in tokenManager.getValidToken() },
+            getDeviceId: { isAPIKey ? PlatformSupport.getDeviceIdentifier() : nil },
+            refreshToken: refreshToken
         )
         #if targetEnvironment(simulator)
         if apiKey == nil {
@@ -109,6 +119,7 @@ public class Grantiva {
         #endif
 
         registerLifecycleObservers()
+        backgroundRefresher.owner = self
     }
 
     deinit {
@@ -578,13 +589,17 @@ public class Grantiva {
 
     // MARK: - Flag Streaming Helpers
 
-    /// Start SSE flag streaming. The `getToken` closure returns the current stored JWT
-    /// so the SSE client always uses a fresh token on reconnect.
+    /// Refresh hook handed to background clients; `nil` in API key mode.
+    private let backgroundRefreshToken: (@Sendable () async -> Bool)?
+
+    /// Start SSE flag streaming. The stream reads the current non-expired JWT on every
+    /// (re)connect and can renew it through `backgroundRefreshToken` when it has expired.
     private func startFlagStreaming() async {
         await flags.startStreaming(
             configuration: configuration,
             teamId: teamId,
-            tokenManager: tokenManager
+            getToken: { [tokenManager] in tokenManager.getValidToken() },
+            refreshToken: backgroundRefreshToken
         )
     }
 
@@ -613,11 +628,13 @@ public class Grantiva {
             let configuration = self.configuration
             let teamId = self.teamId
             let tokenManager = self.tokenManager
+            let refreshToken = self.backgroundRefreshToken
             Task {
                 await flagService.startStreaming(
                     configuration: configuration,
                     teamId: teamId,
-                    tokenManager: tokenManager
+                    getToken: { tokenManager.getValidToken() },
+                    refreshToken: refreshToken
                 )
             }
         }

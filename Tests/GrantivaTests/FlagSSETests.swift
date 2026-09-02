@@ -169,9 +169,8 @@ final class FlagSSETests: XCTestCase {
     func testStartStreamingIsIdempotent() async {
         let service = makeFlagService()
         let config = GrantivaConfiguration(baseURL: "https://api.example.com", retryAttempts: 1, timeout: 5)
-        let tm = TokenManager()
-        await service.startStreaming(configuration: config, teamId: "T1", tokenManager: tm)
-        await service.startStreaming(configuration: config, teamId: "T1", tokenManager: tm) // no-op
+        await service.startStreaming(configuration: config, teamId: "T1", getToken: { nil })
+        await service.startStreaming(configuration: config, teamId: "T1", getToken: { nil }) // no-op
         await service.stopStreaming()
     }
 
@@ -231,7 +230,7 @@ final class FlagSSETests: XCTestCase {
             configuration: config,
             teamId: "TEAM123",
             environment: .production,
-            tokenManager: TokenManager()
+            getToken: { nil }
         )
     }
 }
