@@ -125,8 +125,11 @@ final class HeartbeatTests: XCTestCase {
         }
     }
 
+    // These two use the fallback stub rather than the queue: a heartbeat still in
+    // flight from the interval tests above can drain a queued stub after its own
+    // test has returned, and then the request under test sees the default 200.
     func testHeartbeatThrowsNetworkErrorCarryingTheStatusCode() async {
-        StubURLProtocol.enqueue(.status(401))
+        StubURLProtocol.setFallback(.status(401))
 
         do {
             try await makeAPIClient().sendHeartbeat(token: "jwt", deviceId: nil, appState: nil)
@@ -140,7 +143,7 @@ final class HeartbeatTests: XCTestCase {
     }
 
     func testHeartbeatThrowsOn5xx() async {
-        StubURLProtocol.enqueue(.status(503))
+        StubURLProtocol.setFallback(.status(503))
 
         do {
             try await makeAPIClient().sendHeartbeat(token: "jwt", deviceId: nil, appState: nil)
