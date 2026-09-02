@@ -16,7 +16,12 @@ internal final class FlagSSEClient: @unchecked Sendable {
     private let configuration: GrantivaConfiguration
     private let teamId: String
     private let environment: FlagEnvironment
-    private let tokenManager: TokenManager
+    /// Returns the current non-expired JWT, or `nil` when there is none.
+    private let getToken: @Sendable () -> String?
+    /// Refreshes the JWT through the SDK's attestation path. `nil` in API key mode.
+    private let refreshToken: (@Sendable () async -> Bool)?
+    /// Test seam: `URLProtocol` subclasses installed on the streaming session.
+    private let protocolClasses: [AnyClass]?
 
     /// Invoked on every successfully parsed `flags` SSE event.
     var onFlagsUpdate: ((FlagsUpdate) -> Void)?
@@ -44,18 +49,37 @@ internal final class FlagSSEClient: @unchecked Sendable {
     /// server keepalive interval or the stream churns on every quiet period.
     static let idleTimeout: TimeInterval = 75
 
+    /// Delay before retrying after the token could not be refreshed (or the server
+    /// rejected it and no refresh is possible). This is not a transient transport
+    /// failure, so it does not use the reconnect backoff: a device whose token
+    /// cannot be renewed should try again occasionally, not every few seconds.
+    static let authRetryDelay: TimeInterval = 300
+
+    /// Outcomes of the auth handshake that the run loop schedules differently from
+    /// ordinary transport failures.
+    private enum AuthEvent: Error {
+        /// A 401 was answered by a successful refresh; reconnect promptly.
+        case tokenRefreshed
+        /// No usable token and no way to get one right now.
+        case tokenUnavailable
+    }
+
     // MARK: - Init
 
     init(
         configuration: GrantivaConfiguration,
         teamId: String,
         environment: FlagEnvironment,
-        tokenManager: TokenManager
+        getToken: @escaping @Sendable () -> String?,
+        refreshToken: (@Sendable () async -> Bool)? = nil,
+        protocolClasses: [AnyClass]? = nil
     ) {
         self.configuration = configuration
         self.teamId = teamId
         self.environment = environment
-        self.tokenManager = tokenManager
+        self.getToken = getToken
+        self.refreshToken = refreshToken
+        self.protocolClasses = protocolClasses
     }
 
     // MARK: - Lifecycle
@@ -89,13 +113,22 @@ internal final class FlagSSEClient: @unchecked Sendable {
             guard lock.withLock({ _isRunning }) else { return }
 
             let connectedAt = ContinuousClock.now
+            var delay = backoff
             do {
                 try await connect()
                 // Clean disconnect — reset backoff and reconnect immediately
                 backoff = minBackoff
+                delay = backoff
                 Logger.debug("[Grantiva] SSE stream closed cleanly. Reconnecting…")
             } catch is CancellationError {
                 return
+            } catch AuthEvent.tokenRefreshed {
+                backoff = minBackoff
+                delay = backoff
+                Logger.debug("[Grantiva] SSE token refreshed after 401. Reconnecting…")
+            } catch AuthEvent.tokenUnavailable {
+                delay = Self.authRetryDelay
+                Logger.debug("[Grantiva] SSE has no usable token. Retrying in \(Int(delay))s")
             } catch {
                 // A long-lived connection that eventually dropped is not a sign of
                 // a failing endpoint — start the backoff over instead of compounding
@@ -103,13 +136,14 @@ internal final class FlagSSEClient: @unchecked Sendable {
                 if connectedAt.duration(to: .now) > .seconds(Self.healthyConnectionThreshold) {
                     backoff = minBackoff
                 }
-                Logger.debug("[Grantiva] SSE disconnected (\(error.localizedDescription)). Reconnecting in \(Int(backoff))s")
+                delay = backoff
+                backoff = min(backoff * 2, maxBackoff)
+                Logger.debug("[Grantiva] SSE disconnected (\(error.localizedDescription)). Reconnecting in \(Int(delay))s")
             }
 
             guard !Task.isCancelled else { return }
 
-            try? await Task.sleep(for: .seconds(backoff))
-            backoff = min(backoff * 2, maxBackoff)
+            try? await Task.sleep(for: .seconds(delay))
         }
     }
 
@@ -124,7 +158,7 @@ internal final class FlagSSEClient: @unchecked Sendable {
         var request = URLRequest(url: components.url!)
         request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
         request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
-        applyAuth(to: &request)
+        try await applyAuth(to: &request)
 
         // `timeoutIntervalForResource` is the total lifetime — infinite so the
         // stream can stay open indefinitely. `timeoutIntervalForRequest` is an
@@ -133,6 +167,9 @@ internal final class FlagSSEClient: @unchecked Sendable {
         let sessionConfig = URLSessionConfiguration.default
         sessionConfig.timeoutIntervalForRequest = Self.idleTimeout
         sessionConfig.timeoutIntervalForResource = .infinity
+        if let protocolClasses {
+            sessionConfig.protocolClasses = protocolClasses
+        }
         let session = URLSession(configuration: sessionConfig)
         defer { session.invalidateAndCancel() }
 
@@ -144,7 +181,14 @@ internal final class FlagSSEClient: @unchecked Sendable {
 
         switch http.statusCode {
         case 200...299: break
-        case 401: throw GrantivaError.validationFailed
+        case 401:
+            // Our token looked valid but the server disagrees. Refresh once; the
+            // run loop reconnects promptly on success and backs off for a long
+            // time otherwise, so a rejected token never turns into a 401 storm.
+            if let refreshToken, await refreshToken() {
+                throw AuthEvent.tokenRefreshed
+            }
+            throw AuthEvent.tokenUnavailable
         case 429: throw GrantivaError.rateLimited
         default:
             throw GrantivaError.networkError(
@@ -158,12 +202,23 @@ internal final class FlagSSEClient: @unchecked Sendable {
 
     // MARK: - Auth
 
-    private func applyAuth(to request: inout URLRequest) {
+    private func applyAuth(to request: inout URLRequest) async throws {
         // Always include Bundle ID + Team ID for app scoping. Auth precedence:
         // attestation JWT > API key. The backend rejects requests with neither.
         request.setValue(Bundle.main.bundleIdentifier ?? "", forHTTPHeaderField: "X-Bundle-ID")
         request.setValue(teamId, forHTTPHeaderField: "X-Team-ID")
-        if let token = tokenManager.getStoredToken()?.token {
+
+        var token = getToken()
+        if token == nil, let refreshToken {
+            // Expired or missing token: renew it before connecting instead of
+            // sending a request we already know the server will reject.
+            guard await refreshToken(), let renewed = getToken() else {
+                throw AuthEvent.tokenUnavailable
+            }
+            token = renewed
+        }
+
+        if let token {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         } else if let apiKey = configuration.apiKey {
             request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")

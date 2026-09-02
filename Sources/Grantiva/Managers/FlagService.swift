@@ -135,7 +135,8 @@ public actor FlagService {
     internal func startStreaming(
         configuration: GrantivaConfiguration,
         teamId: String,
-        tokenManager: TokenManager
+        getToken: @escaping @Sendable () -> String?,
+        refreshToken: (@Sendable () async -> Bool)? = nil
     ) {
         guard sseClient == nil else { return }
 
@@ -143,7 +144,8 @@ public actor FlagService {
             configuration: configuration,
             teamId: teamId,
             environment: environment,
-            tokenManager: tokenManager
+            getToken: getToken,
+            refreshToken: refreshToken
         )
         client.onFlagsUpdate = { [weak self] flags in
             guard let self else { return }
