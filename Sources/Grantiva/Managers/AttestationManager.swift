@@ -2,14 +2,9 @@ import Foundation
 import DeviceCheck
 import CryptoKit
 
-internal class AttestationManager {
-    private let keyManager = KeyManager()
-    private let teamId: String
-    
-    init(teamId: String) {
-        self.teamId = teamId
-    }
-    
+internal final class AttestationManager {
+    private static let dcErrorDomain = "com.apple.devicecheck.error"
+
     func generateAttestation(keyId: String, challenge: String) async throws -> Data {
         guard DCAppAttestService.shared.isSupported else {
             throw GrantivaError.attestationNotAvailable
@@ -21,15 +16,12 @@ internal class AttestationManager {
             let attestationObject = try await DCAppAttestService.shared.attestKey(keyId, clientDataHash: clientDataHash)
             return attestationObject
         } catch {
-            // DCErrorDomain codes map to:
-            //   2 = invalidInput (in practice: keyId already attested, can't re-attest)
-            //   3 = invalidKey, 4 = serverUnavailable, 5 = featureUnsupported.
+            // DCError codes: 0 unknownSystemFailure, 1 featureUnsupported,
+            // 2 invalidInput (in practice: keyId already attested, can't re-attest),
+            // 3 invalidKey, 4 serverUnavailable.
             let nsError = error as NSError
             Logger.error("DCAppAttestService.attestKey failed: domain=\(nsError.domain) code=\(nsError.code) description=\(nsError.localizedDescription)")
-            if nsError.domain == "com.apple.devicecheck.error" && nsError.code == 2 {
-                throw GrantivaError.keyAlreadyAttested
-            }
-            throw GrantivaError.validationFailed
+            throw Self.mapAttestationError(nsError)
         }
     }
 
@@ -39,8 +31,22 @@ internal class AttestationManager {
         let hash = SHA256.hash(data: challengeData)
         return Data(hash)
     }
-    
-    
+
+    /// Maps a `DCAppAttestService.attestKey` failure to a `GrantivaError`.
+    ///
+    /// `invalidInput` (2) means the key was already attested and triggers the
+    /// fresh-key retry in `Grantiva.performFullAttestation`. `serverUnavailable`
+    /// (4) is Apple's attestation service being unreachable — transient, so it
+    /// surfaces as `networkError` rather than a terminal validation failure.
+    static func mapAttestationError(_ error: NSError) -> GrantivaError {
+        guard error.domain == dcErrorDomain else { return .validationFailed }
+        switch error.code {
+        case 2: return .keyAlreadyAttested
+        case 4: return .networkError(error)
+        default: return .validationFailed
+        }
+    }
+
     /// Generates an App Attest assertion for token refresh.
     ///
     /// Called when the JWT has expired and the key has already been attested.
@@ -74,16 +80,16 @@ internal class AttestationManager {
     /// "attested" state has drifted from reality (backup restore, device transfer,
     /// partially-completed prior attestation). These are recoverable by re-attesting
     /// with a fresh key, so they map to `assertionKeyInvalid` and trigger the
-    /// self-heal path in `validateAttestation()`. Everything else (e.g. code 4,
-    /// serverUnavailable) is transient and stays `validationFailed`.
+    /// self-heal path in `validateAttestation()`. Code 4 (serverUnavailable) is
+    /// transient and surfaces as `networkError`; everything else stays
+    /// `validationFailed`. Neither must trigger the self-heal, which would burn
+    /// the key for nothing.
     static func mapAssertionError(_ error: NSError) -> GrantivaError {
-        if error.domain == "com.apple.devicecheck.error" && (error.code == 2 || error.code == 3) {
-            return .assertionKeyInvalid
+        guard error.domain == dcErrorDomain else { return .validationFailed }
+        switch error.code {
+        case 2, 3: return .assertionKeyInvalid
+        case 4: return .networkError(error)
+        default: return .validationFailed
         }
-        return .validationFailed
-    }
-
-    func checkDeviceSupport() -> Bool {
-        return DCAppAttestService.shared.isSupported
     }
 }

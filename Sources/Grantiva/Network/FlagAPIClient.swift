@@ -3,124 +3,45 @@ import Foundation
 /// Handles all feature flag API calls.
 internal final class FlagAPIClient: @unchecked Sendable {
     private let configuration: GrantivaConfiguration
-    private let session: URLSession
-    private let teamId: String
-    private let getToken: @Sendable () -> String?
+    private let transport: AuthenticatedTransport
 
-    init(configuration: GrantivaConfiguration, teamId: String, getToken: @escaping @Sendable () -> String? = { nil }) {
+    /// - Parameters:
+    ///   - getToken: Returns the current non-expired attestation JWT, or `nil`.
+    ///   - refreshToken: Renews the JWT when it has expired or been rejected. `nil` in API key mode.
+    ///   - session: Internal seam so tests can install a stub `URLProtocol`.
+    init(
+        configuration: GrantivaConfiguration,
+        teamId: String,
+        getToken: @escaping @Sendable () -> String? = { nil },
+        refreshToken: (@Sendable () async -> Bool)? = nil,
+        session: URLSession? = nil
+    ) {
         self.configuration = configuration
-        self.teamId = teamId
-        self.getToken = getToken
-
-        let sessionConfig = URLSessionConfiguration.default
-        sessionConfig.timeoutIntervalForRequest = configuration.timeout
-        sessionConfig.timeoutIntervalForResource = configuration.timeout
-        self.session = URLSession(configuration: sessionConfig)
+        self.transport = AuthenticatedTransport(
+            configuration: configuration,
+            teamId: teamId,
+            getToken: getToken,
+            refreshToken: refreshToken,
+            session: session
+        )
     }
 
     /// Fetch all flags for the current tenant and environment.
     ///
     /// The backend returns `{ "flags": { "key": typedValue, ... } }` where values are
-    /// natively typed via `JSONSerialization` (bools, ints, doubles, strings, objects).
-    /// We parse them back into `[String: FlagValue]`.
+    /// natively typed (bools, ints, doubles, strings, objects); see `FlagPayloadParser`.
     func fetchFlags(environment: FlagEnvironment) async throws -> [String: FlagValue] {
         var components = URLComponents(string: "\(configuration.baseURL)/api/v1/flags")!
         components.queryItems = [
             URLQueryItem(name: "environment", value: environment.rawValue)
         ]
 
-        let request = makeRequest(url: components.url!, method: "GET")
-        let data = try await perform(request)
+        let request = transport.request(url: components.url!, method: "GET")
+        let data = try await transport.send(request)
 
-        // The response is { "flags": { "key": typedValue } } — NOT Codable-friendly
-        // because values are heterogeneous (bool, int, double, string, object).
-        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let flagsDict = json["flags"] as? [String: Any] else {
+        guard let flags = FlagPayloadParser.parse(data) else {
             throw GrantivaError.invalidResponse
         }
-
-        var result: [String: FlagValue] = [:]
-        for (key, value) in flagsDict {
-            let (rawValue, valueType) = Self.classify(value)
-            result[key] = FlagValue(rawValue: rawValue, valueType: valueType)
-        }
-        return result
-    }
-
-    // MARK: - Classification
-
-    /// Classifies a JSON value into a raw string + type pair.
-    private static func classify(_ value: Any) -> (String, FlagValueType) {
-        // JSONSerialization represents JSON booleans as NSNumber with objCType 'c'.
-        // We must check for Bool *before* numeric types to avoid misclassifying.
-        if let nsNumber = value as? NSNumber {
-            // CFBooleanGetTypeID check distinguishes true booleans from numeric 0/1.
-            if CFGetTypeID(nsNumber) == CFBooleanGetTypeID() {
-                return (nsNumber.boolValue ? "true" : "false", .boolean)
-            }
-            // Check if it's an integer (no fractional part)
-            if nsNumber.doubleValue == Double(nsNumber.intValue) {
-                return ("\(nsNumber.intValue)", .integer)
-            }
-            return ("\(nsNumber.doubleValue)", .double)
-        }
-        if let str = value as? String {
-            return (str, .string)
-        }
-        // Fallback: encode as JSON string
-        if let data = try? JSONSerialization.data(withJSONObject: value),
-           let jsonStr = String(data: data, encoding: .utf8) {
-            return (jsonStr, .json)
-        }
-        return ("\(value)", .string)
-    }
-
-    // MARK: - Request Helpers
-
-    private func makeRequest(url: URL, method: String) -> URLRequest {
-        var request = URLRequest(url: url)
-        request.httpMethod = method
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        // Always send Bundle ID + Team ID for app scoping. Auth precedence:
-        // attestation JWT > API key. The backend rejects requests with neither.
-        request.setValue(getBundleId(), forHTTPHeaderField: "X-Bundle-ID")
-        request.setValue(teamId, forHTTPHeaderField: "X-Team-ID")
-        if let token = getToken() {
-            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        } else if let apiKey = configuration.apiKey {
-            request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-        }
-        return request
-    }
-
-    private func perform(_ request: URLRequest) async throws -> Data {
-        do {
-            let (data, response) = try await session.data(for: request)
-
-            guard let httpResponse = response as? HTTPURLResponse else {
-                throw GrantivaError.invalidResponse
-            }
-
-            switch httpResponse.statusCode {
-            case 200...299:
-                return data
-            case 401:
-                throw GrantivaError.validationFailed
-            case 429:
-                throw GrantivaError.rateLimited
-            default:
-                if let errorResponse = try? JSONDecoder().decode(ErrorResponse.self, from: data) {
-                    Logger.error("Server error: \(errorResponse.reason)")
-                }
-                throw GrantivaError.networkError(NSError(domain: "HTTPError", code: httpResponse.statusCode))
-            }
-        } catch {
-            if error is GrantivaError { throw error }
-            throw GrantivaError.networkError(error)
-        }
-    }
-
-    private func getBundleId() -> String {
-        Bundle.main.bundleIdentifier ?? ""
+        return flags
     }
 }

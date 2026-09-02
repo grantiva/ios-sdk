@@ -1,6 +1,6 @@
 import Foundation
 
-public enum GrantivaError: LocalizedError {
+public enum GrantivaError: LocalizedError, Sendable {
     case deviceNotSupported
     case attestationNotAvailable
     case networkError(Error)

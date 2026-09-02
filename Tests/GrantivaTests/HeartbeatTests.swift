@@ -107,6 +107,27 @@ final class HeartbeatTests: XCTestCase {
         XCTAssertNotNil(body["sdkVersion"])
     }
 
+    func testHeartbeatReportsTheSDKVersionNotTheAppVersion() async throws {
+        StubURLProtocol.enqueue(.status(200))
+
+        try await makeAPIClient().sendHeartbeat(token: "jwt", deviceId: nil, appState: nil)
+
+        let body = try XCTUnwrap(StubURLProtocol.requests.first?.bodyJSON)
+        XCTAssertEqual(body["sdkVersion"] as? String, GrantivaVersion.current)
+    }
+
+    func testHeartbeatReturnsTheServerRecommendedInterval() async throws {
+        StubURLProtocol.enqueue(.json(#"{"status":"ok","nextHeartbeatSeconds":45}"#))
+        let next = try await makeAPIClient().sendHeartbeat(token: "jwt", deviceId: nil, appState: nil)
+        XCTAssertEqual(next, 45)
+    }
+
+    func testHeartbeatReturnsNilWithoutARecommendedInterval() async throws {
+        StubURLProtocol.enqueue(.status(200))
+        let next = try await makeAPIClient().sendHeartbeat(token: "jwt", deviceId: nil, appState: nil)
+        XCTAssertNil(next)
+    }
+
     func testHeartbeatOmitsNilBodyFields() async throws {
         StubURLProtocol.enqueue(.status(200))
 
@@ -273,6 +294,22 @@ final class HeartbeatTests: XCTestCase {
 
         let keptGoing = await waitUntil { StubURLProtocol.requestCount >= 3 }
         XCTAssertTrue(keptGoing, "offline devices must keep retrying on the next interval")
+    }
+
+    /// The server's `nextHeartbeatSeconds` replaces the configured interval, floored
+    /// at `minimumServerInterval` so a misconfigured server cannot make devices spin.
+    func testManagerAdoptsTheServerIntervalWithAFloor() async {
+        StubURLProtocol.setFallback(.json(#"{"status":"ok","nextHeartbeatSeconds":1}"#))
+        let manager = makeManager(interval: 0.02)
+        defer { manager.stop() }
+
+        manager.start()
+        _ = await waitUntil { StubURLProtocol.requestCount >= 1 }
+        // With the 0.02s interval still in force we'd see many more beats in 300ms;
+        // once the server's (floored) interval is adopted the loop goes quiet.
+        try? await Task.sleep(for: .milliseconds(300))
+        XCTAssertLessThanOrEqual(StubURLProtocol.requestCount, 2, "server interval must take over after the first beat")
+        XCTAssertGreaterThanOrEqual(HeartbeatManager.minimumServerInterval, 1)
     }
 
     func testManagerReadsTokenAndDeviceIdLazilyAtSendTime() async throws {

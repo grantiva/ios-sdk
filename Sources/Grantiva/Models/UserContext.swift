@@ -16,7 +16,7 @@ import Foundation
 ///     ]
 /// ))
 /// ```
-public struct UserContext {
+public struct UserContext: Sendable {
     /// A stable, unique identifier for the user in your system.
     public let userId: String
 
@@ -52,7 +52,7 @@ public struct UserContext {
 }
 
 /// Automatically collected device and app information.
-public struct DeviceContext {
+public struct DeviceContext: Sendable {
     public let appBundleId: String
     public let appVersion: String
     public let appBuildNumber: String
