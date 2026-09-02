@@ -1,6 +1,6 @@
 import Foundation
 
-internal class RetryManager {
+internal enum RetryManager {
     
     static func executeWithRetry<T>(
         maxAttempts: Int = 3,
@@ -47,7 +47,14 @@ internal class RetryManager {
     internal static func shouldRetry(error: Error) -> Bool {
         if let grantivaError = error as? GrantivaError {
             switch grantivaError {
-            case .networkError:
+            case .networkError(let underlying):
+                // The feature clients wrap non-2xx statuses as `HTTPError`. A 4xx
+                // is the server's final answer and will not change on retry; 5xx
+                // and 408 are transient.
+                let nsError = underlying as NSError
+                if nsError.domain == "HTTPError" {
+                    return nsError.code >= 500 || nsError.code == 408
+                }
                 return true
             case .challengeExpired:
                 return true

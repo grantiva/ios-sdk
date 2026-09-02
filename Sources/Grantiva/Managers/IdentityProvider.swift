@@ -6,8 +6,16 @@ import Foundation
 /// use it for scoping requests. When no user is identified, services fall back
 /// to device-based identity.
 internal final class IdentityProvider: @unchecked Sendable {
+    /// `identify` runs on the caller's thread while the services read from their
+    /// actors, so the two mutable fields are guarded.
+    private let lock = NSLock()
+    private var _userContext: UserContext?
+    private var _subjectId: String?
+
     /// The full user context, or `nil` if not identified.
-    private(set) var userContext: UserContext?
+    var userContext: UserContext? {
+        lock.withLock { _userContext }
+    }
 
     /// The entitlement sharing-unit id (e.g. a family/household id), or `nil` if unset.
     ///
@@ -16,7 +24,9 @@ internal final class IdentityProvider: @unchecked Sendable {
     /// device links to its `Subject` and inherits the subscription claim. The host app must use
     /// the SAME value as the Apple StoreKit `appAccountToken` and the Stripe Checkout
     /// `client_reference_id`.
-    private(set) var subjectId: String?
+    var subjectId: String? {
+        lock.withLock { _subjectId }
+    }
 
     /// The developer-provided user ID, or `nil` if not identified.
     var userId: String? {
@@ -54,20 +64,22 @@ internal final class IdentityProvider: @unchecked Sendable {
     }
 
     func identify(_ context: UserContext) {
-        self.userContext = context
+        lock.withLock { _userContext = context }
         Logger.info("User identified: \(context.userId) with \(context.properties.count) custom properties")
     }
 
     func clearIdentity() {
-        let previous = userId
-        userContext = nil
+        let previous: String? = lock.withLock {
+            defer { _userContext = nil }
+            return _userContext?.userId
+        }
         if let previous = previous {
             Logger.info("Identity cleared (was: \(previous))")
         }
     }
 
     func setSubjectId(_ subjectId: String?) {
-        self.subjectId = subjectId
+        lock.withLock { _subjectId = subjectId }
         if let subjectId {
             Logger.info("Subject id set: \(subjectId)")
         } else {

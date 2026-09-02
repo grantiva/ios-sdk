@@ -1,12 +1,8 @@
 import XCTest
 @testable import Grantiva
 
-/// Tests for `RetryManager` — the SDK's retry/backoff policy.
-///
-/// NOTE: as of 2.1.0 `RetryManager.executeWithRetry` has no call sites in
-/// `Sources/`, and `GrantivaConfiguration.retryAttempts` is stored but never read.
-/// These tests pin the policy's behaviour so the contract is defined when it is
-/// wired up (and so a regression in it is visible).
+/// Tests for `RetryManager` — the SDK's retry/backoff policy, used by the
+/// attestation challenge request and the What's New client (see `RetryWiringTests`).
 final class RetryManagerTests: XCTestCase {
 
     /// Counts invocations across concurrency domains without a mocking framework.
@@ -42,6 +38,19 @@ final class RetryManagerTests: XCTestCase {
         XCTAssertFalse(RetryManager.shouldRetry(error: GrantivaError.keyAlreadyAttested))
         XCTAssertFalse(RetryManager.shouldRetry(error: GrantivaError.simulatorAPIKeyRequired))
         XCTAssertFalse(RetryManager.shouldRetry(error: GrantivaError.serverError(reason: "nope")))
+    }
+
+    func testShouldRetryOnlyTransientHTTPStatuses() {
+        func wrapped(_ status: Int) -> Error {
+            GrantivaError.networkError(NSError(domain: "HTTPError", code: status))
+        }
+        // A 4xx is the server's final answer; hammering it cannot change the outcome.
+        for status in [400, 403, 404, 409, 422] {
+            XCTAssertFalse(RetryManager.shouldRetry(error: wrapped(status)), "HTTP \(status) must not be retried")
+        }
+        for status in [408, 500, 502, 503, 504] {
+            XCTAssertTrue(RetryManager.shouldRetry(error: wrapped(status)), "HTTP \(status) should be retried")
+        }
     }
 
     func testShouldNotRetryLimitExceeded() {

@@ -30,16 +30,16 @@ internal class PlatformSupport {
         #if os(iOS)
         return UIDevice.current.identifierForVendor?.uuidString ?? "unknown"
         #elseif os(macOS)
-        let service = IOServiceGetMatchingService(kIOMasterPortDefault, IOServiceMatching("IOPlatformExpertDevice"))
-        var serialNumber: String = "unknown"
+        let service = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching("IOPlatformExpertDevice"))
+        guard service != IO_OBJECT_NULL else { return "unknown" }
+        defer { IOObjectRelease(service) }
 
-        if let serialNumberAsCFString = IORegistryEntryCreateCFProperty(service, kIOPlatformSerialNumberKey as CFString, kCFAllocatorDefault, 0)?.takeUnretainedValue() {
-            if CFGetTypeID(serialNumberAsCFString) == CFStringGetTypeID() {
-                serialNumber = String(serialNumberAsCFString as! CFString)
-            }
+        // `IORegistryEntryCreateCFProperty` follows the Create rule, so the
+        // returned reference is +1 and must be taken retained or it leaks.
+        guard let property = IORegistryEntryCreateCFProperty(service, kIOPlatformSerialNumberKey as CFString, kCFAllocatorDefault, 0)?.takeRetainedValue(),
+              let serialNumber = property as? String else {
+            return "unknown"
         }
-
-        IOObjectRelease(service)
         return serialNumber
         #else
         return "unknown"
@@ -54,11 +54,18 @@ internal class PlatformSupport {
         // Use SIMULATOR_MODEL_IDENTIFIER environment variable instead.
         return ProcessInfo.processInfo.environment["SIMULATOR_MODEL_IDENTIFIER"] ?? "Simulator"
         #else
+        // On iOS "hw.machine" is the model ("iPhone14,2"); on macOS it is the CPU
+        // architecture ("arm64") and the model lives under "hw.model".
+        #if os(macOS)
+        let key = "hw.model"
+        #else
+        let key = "hw.machine"
+        #endif
         var size: Int = 0
-        sysctlbyname("hw.machine", nil, &size, nil, 0)
-        var machine = [CChar](repeating: 0, count: size)
-        sysctlbyname("hw.machine", &machine, &size, nil, 0)
-        return String(cString: machine)
+        guard sysctlbyname(key, nil, &size, nil, 0) == 0, size > 0 else { return "unknown" }
+        var machine = [UInt8](repeating: 0, count: size)
+        guard sysctlbyname(key, &machine, &size, nil, 0) == 0 else { return "unknown" }
+        return String(decoding: machine.prefix { $0 != 0 }, as: UTF8.self)
         #endif
     }
 

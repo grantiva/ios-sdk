@@ -68,7 +68,8 @@ if grantiva.isTokenValid() {
     let token = grantiva.getCurrentToken()
 }
 
-// Force a fresh attestation (re-runs full App Attest flow)
+// Returns the current attestation, re-attesting first only if the token has expired.
+// Returns nil if the device has never attested.
 let fresh = try await grantiva.refreshToken()
 
 // Clear stored keys and tokens (useful for testing fresh flows)

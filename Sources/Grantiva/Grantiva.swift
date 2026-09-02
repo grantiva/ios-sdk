@@ -30,7 +30,8 @@ public class Grantiva {
         let feedbackClient = FeedbackAPIClient(
             configuration: configuration,
             teamId: teamId,
-            getToken: { [tokenManager] in tokenManager.getStoredToken()?.token }
+            getToken: { [tokenManager] in tokenManager.getValidToken() },
+            refreshToken: backgroundRefreshToken
         )
         return FeedbackService(apiClient: feedbackClient, identity: identity, pushTokens: pushTokens)
     }()
@@ -46,10 +47,17 @@ public class Grantiva {
         let flagClient = FlagAPIClient(
             configuration: configuration,
             teamId: teamId,
-            getToken: { [tokenManager] in tokenManager.getStoredToken()?.token }
+            getToken: { [tokenManager] in tokenManager.getValidToken() },
+            refreshToken: backgroundRefreshToken
         )
-        return FlagService(apiClient: flagClient, identity: identity)
+        let service = FlagService(apiClient: flagClient, identity: identity)
+        loadedFlags = service
+        return service
     }()
+
+    /// The flag service once `flags` has been touched, so `deinit` can stop its
+    /// stream without forcing the lazy property to materialise.
+    private var loadedFlags: FlagService?
 
     /// Lazy-initialized "What's New" service for version-targeted release notes.
     ///
@@ -65,7 +73,8 @@ public class Grantiva {
         let whatsNewClient = WhatsNewAPIClient(
             configuration: configuration,
             teamId: teamId,
-            getToken: { [tokenManager] in tokenManager.getStoredToken()?.token }
+            getToken: { [tokenManager] in tokenManager.getValidToken() },
+            refreshToken: backgroundRefreshToken
         )
         return WhatsNewService(apiClient: whatsNewClient)
     }()
@@ -84,7 +93,7 @@ public class Grantiva {
         self.pushTokens = PushTokenStore()
         self.apiClient = GrantivaAPIClient(configuration: config, teamId: teamId)
         self.keyManager = KeyManager()
-        self.attestationManager = AttestationManager(teamId: teamId)
+        self.attestationManager = AttestationManager()
         self.tokenManager = TokenManager()
         let isAPIKey = apiKey != nil
         // In API key mode there is no JWT to renew: the key itself authenticates,
@@ -124,6 +133,10 @@ public class Grantiva {
 
     deinit {
         lifecycleObservers.forEach { NotificationCenter.default.removeObserver($0) }
+        heartbeatManager.stop()
+        if let flagService = loadedFlags {
+            Task { await flagService.stopStreaming() }
+        }
     }
 
     /// Associate a user identity and context with this Grantiva instance.
@@ -134,7 +147,7 @@ public class Grantiva {
     /// Device info (model, OS, app version, etc.) is collected automatically.
     ///
     /// ```swift
-    /// grantiva.identify(UserContext(
+    /// await grantiva.identify(UserContext(
     ///     userId: "user_123",
     ///     properties: [
     ///         "plan": "premium",
@@ -155,7 +168,7 @@ public class Grantiva {
     /// Convenience: identify with just a user ID and no custom properties.
     ///
     /// ```swift
-    /// grantiva.identify("user_123")
+    /// await grantiva.identify("user_123")
     /// ```
     ///
     /// - Parameter userId: A stable, unique identifier for the user in your system.
@@ -168,7 +181,7 @@ public class Grantiva {
     /// Services will fall back to device-based identity. Call this on logout.
     ///
     /// ```swift
-    /// grantiva.clearIdentity()
+    /// await grantiva.clearIdentity()
     /// ```
     public func clearIdentity() async {
         identity.clearIdentity()
@@ -299,59 +312,32 @@ public class Grantiva {
         // tenant on the backend, so device attestation is unnecessary.
         if configuration.apiKey != nil {
             Logger.info("API key mode — returning synthetic attestation result")
-            let deviceIntelligence = DeviceIntelligence(
-                deviceId: PlatformSupport.getDeviceIdentifier(),
-                riskScore: nil,
-                riskCategory: .trusted,
-                deviceIntegrity: "api_key_mode",
-                jailbreakDetected: false,
-                attestationCount: 0,
-                lastAttestationDate: nil
-            )
-            heartbeatManager.start()
-            await startFlagStreaming()
+            await startBackgroundServices()
             return AttestationResult(
                 isValid: true,
                 token: "simulator-dev-token",
                 expiresAt: Date().addingTimeInterval(60 * 60 * 24 * 365), // 1 year
-                deviceIntelligence: deviceIntelligence
+                deviceIntelligence: syntheticDeviceIntelligence(integrity: "api_key_mode")
             )
         }
 
-        #if targetEnvironment(simulator)
-        // Simulator path without an API key — give a clear, actionable error instead
-        // of letting DeviceCompatibility throw a generic deviceNotSupported.
-        Logger.error(
-            "validateAttestation() called on iOS Simulator without an API key. " +
-            "Initialize with Grantiva(teamId:apiKey:) for simulator builds. " +
-            "See https://docs.grantiva.io/simulator"
-        )
-        throw GrantivaError.simulatorAPIKeyRequired
-        #endif
-
         try DeviceCompatibility.checkCompatibility()
-        
-        if let storedToken = tokenManager.getStoredToken() {
-            if !tokenManager.isTokenExpired(storedToken.expiresAt) {
-                Logger.debug("Using cached token")
-                let deviceIntelligence = tokenManager.getStoredDeviceIntelligence() ?? DeviceIntelligence(
-                    deviceId: PlatformSupport.getDeviceIdentifier(),
-                    riskScore: nil,
-                    riskCategory: .trusted,
-                    deviceIntegrity: "cached",
-                    jailbreakDetected: false,
-                    attestationCount: 0,
-                    lastAttestationDate: nil
-                )
-                return AttestationResult(
-                    isValid: true,
-                    token: storedToken.token,
-                    expiresAt: storedToken.expiresAt,
-                    deviceIntelligence: deviceIntelligence
-                )
-            }
+
+        if let storedToken = tokenManager.getStoredToken(),
+           !tokenManager.isTokenExpired(storedToken.expiresAt) {
+            Logger.debug("Using cached token")
+            // A cold launch with a still-valid token must bring the heartbeat and
+            // flag stream up too, or presence and live flags silently stay off
+            // until the token expires or the app is backgrounded and resumed.
+            await startBackgroundServices()
+            return AttestationResult(
+                isValid: true,
+                token: storedToken.token,
+                expiresAt: storedToken.expiresAt,
+                deviceIntelligence: storedDeviceIntelligence(fallbackIntegrity: "cached")
+            )
         }
-        
+
         Logger.info("Requesting challenge from server...")
         let challengeResponse = try await apiClient.requestChallenge()
         Logger.debug("Received challenge: \(challengeResponse.challenge)")
@@ -458,29 +444,17 @@ public class Grantiva {
         tokenManager.saveToken(response.token, expiresAt: expiresAt)
         keyManager.markAsAttested()
 
-        let riskCategory = RiskCategory(rawValue: response.deviceIntelligence.riskCategory) ?? .trusted
-        let deviceIntelligence = DeviceIntelligence(
-            deviceId: response.deviceIntelligence.deviceId,
-            riskScore: response.deviceIntelligence.riskScore,
-            riskCategory: riskCategory,
-            deviceIntegrity: response.deviceIntelligence.deviceIntegrity,
-            jailbreakDetected: response.deviceIntelligence.jailbreakDetected,
-            attestationCount: response.deviceIntelligence.attestationCount,
-            lastAttestationDate: response.deviceIntelligence.lastAttestationDate != nil ? dateFormatter.date(from: response.deviceIntelligence.lastAttestationDate!) : nil
-        )
+        let deviceIntelligence = DeviceIntelligenceExtractor.extractFromResponse(response.deviceIntelligence)
         tokenManager.saveDeviceIntelligence(deviceIntelligence)
 
-        let customClaims = response.customClaims
-
         Logger.info("Attestation completed successfully")
-        heartbeatManager.start()
-        await startFlagStreaming()
+        await startBackgroundServices()
         return AttestationResult(
             isValid: response.isValid,
             token: response.token,
             expiresAt: expiresAt,
             deviceIntelligence: deviceIntelligence,
-            customClaims: customClaims
+            customClaims: response.customClaims
         )
     }
     
@@ -507,25 +481,36 @@ public class Grantiva {
         tokenManager.saveToken(response.token, expiresAt: expiresAt)
         Logger.info("Token refreshed via assertion")
 
-        let deviceIntelligence = tokenManager.getStoredDeviceIntelligence() ?? DeviceIntelligence(
-            deviceId: PlatformSupport.getDeviceIdentifier(),
-            riskScore: nil,
-            riskCategory: .trusted,
-            deviceIntegrity: "asserted",
-            jailbreakDetected: false,
-            attestationCount: 0,
-            lastAttestationDate: nil
-        )
-
-        heartbeatManager.start()
+        await startBackgroundServices()
         return AttestationResult(
             isValid: true,
             token: response.token,
             expiresAt: expiresAt,
-            deviceIntelligence: deviceIntelligence
+            deviceIntelligence: storedDeviceIntelligence(fallbackIntegrity: "asserted")
         )
     }
 
+    /// The intelligence saved by the last full attestation, or a neutral placeholder
+    /// when nothing is stored (e.g. the keychain was cleared under us).
+    private func storedDeviceIntelligence(fallbackIntegrity: String) -> DeviceIntelligence {
+        tokenManager.getStoredDeviceIntelligence() ?? syntheticDeviceIntelligence(integrity: fallbackIntegrity)
+    }
+
+    private func syntheticDeviceIntelligence(integrity: String) -> DeviceIntelligence {
+        DeviceIntelligence(
+            deviceId: PlatformSupport.getDeviceIdentifier(),
+            riskScore: nil,
+            riskCategory: .trusted,
+            deviceIntegrity: integrity,
+            jailbreakDetected: false,
+            attestationCount: 0,
+            lastAttestationDate: nil
+        )
+    }
+
+    /// Returns the current attestation, re-attesting (or refreshing via assertion)
+    /// first if the stored token has expired. Returns `nil` when the device has
+    /// never attested.
     public func refreshToken() async throws -> AttestationResult? {
         guard let storedToken = tokenManager.getStoredToken() else {
             return nil
@@ -534,43 +519,23 @@ public class Grantiva {
         if tokenManager.isTokenExpired(storedToken.expiresAt) {
             return try await validateAttestation()
         }
-        
-        let deviceIntelligence = DeviceIntelligence(
-            deviceId: PlatformSupport.getDeviceIdentifier(),
-            riskScore: nil,
-            riskCategory: .trusted,
-            deviceIntegrity: "valid",
-            jailbreakDetected: false,
-            attestationCount: 0,
-            lastAttestationDate: nil
-        )
-        
+
         return AttestationResult(
             isValid: true,
             token: storedToken.token,
             expiresAt: storedToken.expiresAt,
-            deviceIntelligence: deviceIntelligence
+            deviceIntelligence: storedDeviceIntelligence(fallbackIntegrity: "valid")
         )
     }
     
+    /// The stored JWT, or `nil` when there is none or it is within five minutes of expiry.
     public func getCurrentToken() -> String? {
-        guard let storedToken = tokenManager.getStoredToken() else {
-            return nil
-        }
-        
-        if tokenManager.isTokenExpired(storedToken.expiresAt) {
-            return nil
-        }
-        
-        return storedToken.token
+        tokenManager.getValidToken()
     }
-    
+
+    /// Whether a stored JWT exists and is not within five minutes of expiry.
     public func isTokenValid() -> Bool {
-        guard let storedToken = tokenManager.getStoredToken() else {
-            return false
-        }
-        
-        return !tokenManager.isTokenExpired(storedToken.expiresAt)
+        tokenManager.getValidToken() != nil
     }
     
     /// Clears stored attestation data for testing purposes.
@@ -587,10 +552,18 @@ public class Grantiva {
         Logger.info("Stored data cleared")
     }
 
-    // MARK: - Flag Streaming Helpers
+    // MARK: - Background Services
 
-    /// Refresh hook handed to background clients; `nil` in API key mode.
+    /// Refresh hook handed to the feature clients, heartbeat and flag stream; `nil`
+    /// in API key mode, where the key itself authenticates.
     private let backgroundRefreshToken: (@Sendable () async -> Bool)?
+
+    /// Brings up the heartbeat and the SSE flag stream. Both are idempotent, so
+    /// every path that ends with a usable token calls this.
+    private func startBackgroundServices() async {
+        heartbeatManager.start()
+        await startFlagStreaming()
+    }
 
     /// Start SSE flag streaming. The stream reads the current non-expired JWT on every
     /// (re)connect and can renew it through `backgroundRefreshToken` when it has expired.

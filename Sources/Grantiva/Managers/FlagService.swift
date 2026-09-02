@@ -29,8 +29,9 @@ public actor FlagService {
     /// Default environment used for flag evaluation.
     public var environment: FlagEnvironment
 
-    /// Cache TTL in seconds. Defaults to 5 minutes.
-    public var cacheTTL: TimeInterval = 300
+    /// Cache TTL in seconds. Defaults to 5 minutes. Actor-isolated, so change it
+    /// with ``setCacheTTL(_:)`` from outside the actor.
+    public private(set) var cacheTTL: TimeInterval = 300
 
     // In-memory cache
     private var cachedFlags: [String: FlagValue]?
@@ -95,6 +96,15 @@ public actor FlagService {
     /// Convenience: get a double flag, returning a default if not found.
     public func doubleValue(for key: String, default defaultValue: Double = 0.0) async throws -> Double {
         try await value(for: key)?.doubleValue ?? defaultValue
+    }
+
+    /// Set the cache TTL in seconds. Pass `0` to fetch on every call.
+    ///
+    /// ```swift
+    /// await grantiva.flags.setCacheTTL(60)
+    /// ```
+    public func setCacheTTL(_ ttl: TimeInterval) {
+        cacheTTL = max(0, ttl)
     }
 
     /// Force refresh the flag cache on the next fetch.

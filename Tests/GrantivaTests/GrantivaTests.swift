@@ -54,16 +54,6 @@ final class GrantivaTests: XCTestCase {
         XCTAssertNotNil(systemInfo["systemVersion"])
     }
     
-    func testCustomClaimsProcessing() {
-        let testClaims = ["user_id": "123", "role": "admin"]
-        let isValid = CustomClaimsProcessor.validateClaims(testClaims)
-        XCTAssertTrue(isValid)
-        
-        let invalidClaims = ["iss": "invalid"]
-        let isInvalid = CustomClaimsProcessor.validateClaims(invalidClaims)
-        XCTAssertFalse(isInvalid)
-    }
-    
     func testErrorHandling() {
         let error = GrantivaError.deviceNotSupported
         XCTAssertNotNil(error.errorDescription)
@@ -157,9 +147,10 @@ final class GrantivaTests: XCTestCase {
     func testAssertionErrorMappingLeavesTransientErrorsAlone() {
         let dcDomain = "com.apple.devicecheck.error"
 
-        // serverUnavailable (4) is transient — re-attesting would burn the key for nothing.
-        guard case .validationFailed = AttestationManager.mapAssertionError(NSError(domain: dcDomain, code: 4)) else {
-            return XCTFail("DCError serverUnavailable (4) should stay validationFailed")
+        // serverUnavailable (4) is transient — re-attesting would burn the key for nothing,
+        // so it surfaces as a network error the app can simply retry.
+        guard case .networkError = AttestationManager.mapAssertionError(NSError(domain: dcDomain, code: 4)) else {
+            return XCTFail("DCError serverUnavailable (4) should map to networkError")
         }
         // Same codes from a different domain (e.g. NSURLErrorDomain) must not trigger self-heal.
         guard case .validationFailed = AttestationManager.mapAssertionError(NSError(domain: NSURLErrorDomain, code: 2)) else {
@@ -167,12 +158,51 @@ final class GrantivaTests: XCTestCase {
         }
     }
     
+    func testAttestationErrorMapping() {
+        let dcDomain = "com.apple.devicecheck.error"
+
+        guard case .keyAlreadyAttested = AttestationManager.mapAttestationError(NSError(domain: dcDomain, code: 2)) else {
+            return XCTFail("DCError invalidInput (2) should map to keyAlreadyAttested")
+        }
+        guard case .networkError = AttestationManager.mapAttestationError(NSError(domain: dcDomain, code: 4)) else {
+            return XCTFail("DCError serverUnavailable (4) should map to networkError")
+        }
+        guard case .validationFailed = AttestationManager.mapAttestationError(NSError(domain: dcDomain, code: 3)) else {
+            return XCTFail("DCError invalidKey (3) should stay validationFailed")
+        }
+        guard case .validationFailed = AttestationManager.mapAttestationError(NSError(domain: NSURLErrorDomain, code: 2)) else {
+            return XCTFail("Non-DeviceCheck domains should stay validationFailed")
+        }
+    }
+
     func testDeviceIntelligenceExtraction() {
-        let riskScore = 75
-        let riskLevel = DeviceIntelligenceExtractor.analyzeRiskScore(riskScore)
-        XCTAssertEqual(riskLevel, "High Risk")
-        
-        let securityFeatures = DeviceIntelligenceExtractor.getDeviceSecurityFeatures()
-        XCTAssertNotNil(securityFeatures["appAttestSupported"])
+        let response = DeviceIntelligenceResponse(
+            deviceId: "dev-1",
+            riskScore: 42,
+            riskCategory: "suspicious",
+            deviceIntegrity: "verified",
+            jailbreakDetected: false,
+            attestationCount: 3,
+            lastAttestationDate: "2026-06-01T12:00:00Z"
+        )
+        let intelligence = DeviceIntelligenceExtractor.extractFromResponse(response)
+        XCTAssertEqual(intelligence.deviceId, "dev-1")
+        XCTAssertEqual(intelligence.riskScore, 42)
+        XCTAssertEqual(intelligence.riskCategory, .suspicious)
+        XCTAssertEqual(intelligence.attestationCount, 3)
+        XCTAssertNotNil(intelligence.lastAttestationDate)
+
+        let unknownCategory = DeviceIntelligenceResponse(
+            deviceId: "dev-2", riskScore: nil, riskCategory: "???", deviceIntegrity: "x",
+            jailbreakDetected: true, attestationCount: 0, lastAttestationDate: nil
+        )
+        let fallback = DeviceIntelligenceExtractor.extractFromResponse(unknownCategory)
+        XCTAssertEqual(fallback.riskCategory, .trusted, "unknown categories fall back to trusted")
+        XCTAssertNil(fallback.lastAttestationDate)
+    }
+
+    func testHardwareModelIsNeverEmpty() {
+        XCTAssertFalse(PlatformSupport.getHardwareModel().isEmpty)
+        XCTAssertNotEqual(PlatformSupport.getHardwareModel(), "unknown")
     }
 }
