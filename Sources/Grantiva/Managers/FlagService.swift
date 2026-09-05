@@ -35,6 +35,7 @@ public actor FlagService {
     // In-memory cache
     private var cachedFlags: [String: FlagValue]?
     private var cacheExpiry: Date?
+    private var cacheRevision: UInt64 = 0
 
     // SSE streaming
     private var sseClient: FlagSSEClient?
@@ -54,11 +55,15 @@ public actor FlagService {
     /// - Parameter forceRefresh: Pass `true` to bypass the cache.
     /// - Returns: A dictionary mapping flag keys to their resolved values.
     public func getFlags(forceRefresh: Bool = false) async throws -> [String: FlagValue] {
+        if forceRefresh { clearCache() }
         if !forceRefresh, let cached = cachedFlags, let expiry = cacheExpiry, Date() < expiry {
             return cached
         }
 
+        let revision = cacheRevision
         let flags = try await apiClient.fetchFlags(environment: environment, contextHeaders: identity.flagHeaders)
+        // Identity changes and newer stream events invalidate in-flight results.
+        guard revision == cacheRevision else { return try await getFlags() }
         cachedFlags = flags
         cacheExpiry = Date().addingTimeInterval(cacheTTL)
         return flags
@@ -99,12 +104,12 @@ public actor FlagService {
 
     /// Force refresh the flag cache on the next fetch.
     public func refresh() {
-        cachedFlags = nil
-        cacheExpiry = nil
+        clearCache()
     }
 
     /// Clear all cached flag data. Called internally when identity changes.
     public func clearCache() {
+        cacheRevision &+= 1
         cachedFlags = nil
         cacheExpiry = nil
     }
@@ -171,8 +176,10 @@ public actor FlagService {
     /// Treat each event as an invalidation and evaluate using current identity.
     internal func refreshAfterSSEUpdate() async {
         clearCache()
+        let revision = cacheRevision
         do {
-            let flags = try await getFlags(forceRefresh: true)
+            let flags = try await getFlags()
+            guard revision == cacheRevision else { return }
             handleSSEUpdate(flags)
         } catch {
             Logger.warning("Flag evaluation after stream update failed: \(error)")

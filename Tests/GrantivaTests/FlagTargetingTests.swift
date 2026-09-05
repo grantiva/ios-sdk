@@ -74,4 +74,61 @@ final class FlagTargetingTests: XCTestCase {
         XCTAssertNil(request.header("X-Custom-plan"))
         XCTAssertEqual(request.header("X-User-ID"), "alice")
     }
+
+    func testOldUserResponseCannotOverwriteNewUserEvaluation() async throws {
+        let identity = IdentityProvider()
+        identity.identify(UserContext(userId: "alice"))
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [HeldFlagProtocol.self]
+        let session = URLSession(configuration: config)
+        defer { session.invalidateAndCancel() }
+        let flags = FlagService(apiClient: FlagAPIClient(
+            configuration: GrantivaConfiguration(baseURL: "https://test.grantiva.invalid", apiKey: "key"),
+            teamId: "TEAM", session: session
+        ), identity: identity)
+        let oldRequest = Task { await flags.refreshAfterSSEUpdate() }
+        defer { HeldFlagProtocol.releaseAlice() }
+        for _ in 0..<200 {
+            if HeldFlagProtocol.hasAlice { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertTrue(HeldFlagProtocol.hasAlice)
+        identity.identify(UserContext(userId: "bob"))
+        await flags.refreshAfterSSEUpdate()
+        HeldFlagProtocol.releaseAlice()
+        await oldRequest.value
+        let result = try await flags.getFlags()
+        XCTAssertEqual(result["premium"]?.boolValue, false,
+                       "Alice's delayed response must not replace Bob's evaluated flags")
+    }
+}
+
+private final class HeldFlagProtocol: URLProtocol, @unchecked Sendable {
+    private static let lock = NSLock()
+    nonisolated(unsafe) private static var alice: HeldFlagProtocol?
+    static var hasAlice: Bool { lock.withLock { alice != nil } }
+
+    static func releaseAlice() {
+        let held = lock.withLock { let held = alice; alice = nil; return held }
+        held?.finish(premium: true)
+    }
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        if request.value(forHTTPHeaderField: "X-User-ID") == "alice" {
+            Self.lock.withLock { Self.alice = self }
+        } else {
+            finish(premium: false)
+        }
+    }
+    override func stopLoading() {}
+
+    private func finish(premium: Bool) {
+        let response = HTTPURLResponse(url: request.url!, statusCode: 200,
+                                       httpVersion: nil, headerFields: nil)!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data("{\"flags\":{\"premium\":\(premium)}}".utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
 }
