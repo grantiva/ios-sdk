@@ -53,6 +53,27 @@ internal final class IdentityProvider: @unchecked Sendable {
         return DeviceContext.current().toDictionary()
     }
 
+    /// Wire names consumed by the backend's DeviceFlagContext.
+    var flagHeaders: [String: String] {
+        let names = [
+            "device_model": "X-Device-Model", "os_version": "X-OS-Version",
+            "app_version": "X-App-Version", "locale": "X-Locale",
+            "country": "X-Country", "user_id": "X-User-ID",
+            "risk_score": "X-Risk-Score", "attestation_status": "X-Attestation-Status"
+        ]
+        var headers = ["X-Device-ID": deviceHash]
+        for (key, value) in allProperties {
+            // Custom property names become HTTP field names. Reject controls or
+            // separators instead of allowing a property to inject headers.
+            guard !key.isEmpty, key.utf8.allSatisfy({
+                (65...90).contains($0) || (97...122).contains($0)
+                    || (48...57).contains($0) || $0 == 45 || $0 == 95
+            }), !value.contains("\r"), !value.contains("\n") else { continue }
+            headers[names[key] ?? "X-Custom-\(key)"] = value
+        }
+        return headers
+    }
+
     func identify(_ context: UserContext) {
         self.userContext = context
         Logger.info("User identified: \(context.userId) with \(context.properties.count) custom properties")
