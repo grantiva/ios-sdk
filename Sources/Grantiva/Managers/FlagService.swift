@@ -58,7 +58,7 @@ public actor FlagService {
             return cached
         }
 
-        let flags = try await apiClient.fetchFlags(environment: environment)
+        let flags = try await apiClient.fetchFlags(environment: environment, contextHeaders: identity.flagHeaders)
         cachedFlags = flags
         cacheExpiry = Date().addingTimeInterval(cacheTTL)
         return flags
@@ -147,9 +147,9 @@ public actor FlagService {
             getToken: getToken,
             refreshToken: refreshToken
         )
-        client.onFlagsUpdate = { [weak self] flags in
+        client.onFlagsUpdate = { [weak self] _ in
             guard let self else { return }
-            Task { await self.handleSSEUpdate(flags) }
+            Task { await self.refreshAfterSSEUpdate() }
         }
         sseClient = client
         client.start()
@@ -167,8 +167,20 @@ public actor FlagService {
 
     // MARK: - Private
 
+    /// The stream carries environment defaults, not user-targeted evaluations.
+    /// Treat each event as an invalidation and evaluate using current identity.
+    internal func refreshAfterSSEUpdate() async {
+        clearCache()
+        do {
+            let flags = try await getFlags(forceRefresh: true)
+            handleSSEUpdate(flags)
+        } catch {
+            Logger.warning("Flag evaluation after stream update failed: \(error)")
+        }
+    }
+
     internal func handleSSEUpdate(_ flags: [String: FlagValue]) {
-        // Update cache so getFlags() immediately reflects the live values
+        // Publish evaluated values, never the un-targeted stream defaults.
         cachedFlags = flags
         cacheExpiry = Date().addingTimeInterval(cacheTTL)
         updateHandler?(flags)

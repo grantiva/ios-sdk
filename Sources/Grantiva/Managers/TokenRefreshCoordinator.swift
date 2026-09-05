@@ -71,7 +71,9 @@ internal final class BackgroundTokenRefresher: @unchecked Sendable {
         guard let owner else { return false }
         return await coordinator.refresh {
             do {
-                _ = try await owner.validateAttestation()
+                // A server can reject a JWT before its local expiry (for example
+                // after signing-key rotation). Never reuse it on this path.
+                _ = try await owner.validateAttestation(forceRefresh: true)
                 return true
             } catch {
                 Logger.warning("[Grantiva] Background token refresh failed: \(error)")

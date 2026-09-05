@@ -87,5 +87,6 @@ CLAUDE.md
 .idea/
 
 # Other
+.worktrees/
 *.log
 *.tmp.claude/

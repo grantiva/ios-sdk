@@ -7,7 +7,7 @@ internal final class FlagAPIClient: @unchecked Sendable {
     private let teamId: String
     private let getToken: @Sendable () -> String?
 
-    init(configuration: GrantivaConfiguration, teamId: String, getToken: @escaping @Sendable () -> String? = { nil }) {
+    init(configuration: GrantivaConfiguration, teamId: String, getToken: @escaping @Sendable () -> String? = { nil }, session: URLSession? = nil) {
         self.configuration = configuration
         self.teamId = teamId
         self.getToken = getToken
@@ -15,7 +15,7 @@ internal final class FlagAPIClient: @unchecked Sendable {
         let sessionConfig = URLSessionConfiguration.default
         sessionConfig.timeoutIntervalForRequest = configuration.timeout
         sessionConfig.timeoutIntervalForResource = configuration.timeout
-        self.session = URLSession(configuration: sessionConfig)
+        self.session = session ?? URLSession(configuration: sessionConfig)
     }
 
     /// Fetch all flags for the current tenant and environment.
@@ -23,13 +23,16 @@ internal final class FlagAPIClient: @unchecked Sendable {
     /// The backend returns `{ "flags": { "key": typedValue, ... } }` where values are
     /// natively typed via `JSONSerialization` (bools, ints, doubles, strings, objects).
     /// We parse them back into `[String: FlagValue]`.
-    func fetchFlags(environment: FlagEnvironment) async throws -> [String: FlagValue] {
+    func fetchFlags(environment: FlagEnvironment, contextHeaders: [String: String] = [:]) async throws -> [String: FlagValue] {
         var components = URLComponents(string: "\(configuration.baseURL)/api/v1/flags")!
         components.queryItems = [
             URLQueryItem(name: "environment", value: environment.rawValue)
         ]
 
-        let request = makeRequest(url: components.url!, method: "GET")
+        var request = makeRequest(url: components.url!, method: "GET")
+        for (name, value) in contextHeaders {
+            request.setValue(value, forHTTPHeaderField: name)
+        }
         let data = try await perform(request)
 
         // The response is { "flags": { "key": typedValue } } — NOT Codable-friendly

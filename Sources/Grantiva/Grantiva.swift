@@ -282,6 +282,10 @@ public class Grantiva {
     }
 
     public func validateAttestation() async throws -> AttestationResult {
+        try await validateAttestation(forceRefresh: false)
+    }
+
+    internal func validateAttestation(forceRefresh: Bool) async throws -> AttestationResult {
         Logger.info("Starting attestation validation...")
 
         #if targetEnvironment(simulator)
@@ -331,7 +335,7 @@ public class Grantiva {
 
         try DeviceCompatibility.checkCompatibility()
         
-        if let storedToken = tokenManager.getStoredToken() {
+        if !forceRefresh, let storedToken = tokenManager.getStoredToken() {
             if !tokenManager.isTokenExpired(storedToken.expiresAt) {
                 Logger.debug("Using cached token")
                 let deviceIntelligence = tokenManager.getStoredDeviceIntelligence() ?? DeviceIntelligence(
