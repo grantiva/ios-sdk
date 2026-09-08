@@ -36,8 +36,9 @@ import Foundation
 public actor WhatsNewService {
     private let apiClient: WhatsNewAPIClient
 
-    /// Cache TTL in seconds. Defaults to 5 minutes.
-    public var cacheTTL: TimeInterval = 300
+    /// Cache TTL in seconds. Defaults to 5 minutes. Actor-isolated, so change it
+    /// with ``setCacheTTL(_:)`` from outside the actor.
+    public private(set) var cacheTTL: TimeInterval = 300
 
     // In-memory cache
     private var cachedNotes: [ReleaseNote]?
@@ -91,12 +92,8 @@ public actor WhatsNewService {
         cacheExpiry = nil
     }
 
-    // MARK: - Internal
-
-    /// Internal seam: ``cacheTTL`` is actor-isolated and so cannot be assigned from
-    /// outside the actor. Tests use this to exercise expiry deterministically.
-    /// Not part of the public API.
-    internal func setCacheTTL(_ ttl: TimeInterval) {
-        cacheTTL = ttl
+    /// Set the cache TTL in seconds. Pass `0` to fetch on every call.
+    public func setCacheTTL(_ ttl: TimeInterval) {
+        cacheTTL = max(0, ttl)
     }
 }

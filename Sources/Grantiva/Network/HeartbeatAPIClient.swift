@@ -29,7 +29,10 @@ internal final class HeartbeatAPIClient: @unchecked Sendable {
     ///   - token: JWT token from attestation (nil in API key mode)
     ///   - deviceId: Device identifier for API key / simulator mode
     ///   - appState: Current app state (e.g. "active", "background")
-    func sendHeartbeat(token: String?, deviceId: String?, appState: String?) async throws {
+    /// - Returns: The server's recommended delay before the next heartbeat, in
+    ///   seconds, or `nil` when the response carries none.
+    @discardableResult
+    func sendHeartbeat(token: String?, deviceId: String?, appState: String?) async throws -> TimeInterval? {
         let url = URL(string: "\(configuration.baseURL)/api/v1/heartbeat")!
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
@@ -46,19 +49,29 @@ internal final class HeartbeatAPIClient: @unchecked Sendable {
         }
 
         var body: [String: String] = [:]
-        body["sdkVersion"] = PlatformSupport.getAppVersion()
+        body["sdkVersion"] = GrantivaVersion.current
         if let appState { body["appState"] = appState }
         if let deviceId { body["deviceId"] = deviceId }
 
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
-        let (_, response) = try await session.data(for: request)
+        let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
             throw GrantivaError.networkError(
                 NSError(domain: "HeartbeatError",
                         code: (response as? HTTPURLResponse)?.statusCode ?? 0)
             )
         }
+
+        guard let payload = try? JSONDecoder().decode(HeartbeatResponse.self, from: data),
+              let next = payload.nextHeartbeatSeconds, next > 0 else {
+            return nil
+        }
+        return TimeInterval(next)
+    }
+
+    private struct HeartbeatResponse: Decodable {
+        let nextHeartbeatSeconds: Int?
     }
 
     private func getBundleId() -> String {

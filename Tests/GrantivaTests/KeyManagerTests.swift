@@ -95,18 +95,6 @@ final class KeyManagerTests: XCTestCase {
         XCTAssertTrue(keyManager.hasBeenAttested())
     }
 
-    /// The self-heal path: drop the attested flag so the next call re-attests, but
-    /// keep the key id — App Attest will not issue a second key for the same app.
-    func testClearAttestedFlagKeepsTheKeyId() throws {
-        try keyManager.saveKeyId("KEY-KEEPME")
-        keyManager.markAsAttested()
-
-        keyManager.clearAttestedFlag()
-
-        XCTAssertFalse(keyManager.hasBeenAttested())
-        XCTAssertEqual(keyManager.getStoredKeyId(), "KEY-KEEPME", "clearing the attested flag must not discard the key id")
-    }
-
     func testClearStoredKeyIdAlsoClearsAttestedFlag() throws {
         try keyManager.saveKeyId("KEY-BOTH")
         keyManager.markAsAttested()

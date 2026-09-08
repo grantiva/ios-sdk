@@ -1,6 +1,6 @@
 import Foundation
 
-internal class GrantivaAPIClient {
+internal final class GrantivaAPIClient {
     private let configuration: GrantivaConfiguration
     private let session: URLSession
     private let teamId: String

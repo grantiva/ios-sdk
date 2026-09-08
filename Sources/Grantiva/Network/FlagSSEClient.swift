@@ -89,19 +89,25 @@ internal final class FlagSSEClient: @unchecked Sendable {
         lock.withLock {
             guard !_isRunning else { return }
             _isRunning = true
-        }
-
-        streamTask = Task { [weak self] in
-            guard let self else { return }
-            await self.runLoop()
+            streamTask = Task { [weak self] in
+                guard let self else { return }
+                await self.runLoop()
+            }
         }
     }
 
     /// Stop the SSE connection and cancel any pending reconnect.
     func stop() {
-        lock.withLock { _isRunning = false }
+        let task: Task<Void, Never>? = lock.withLock {
+            _isRunning = false
+            defer { streamTask = nil }
+            return streamTask
+        }
+        task?.cancel()
+    }
+
+    deinit {
         streamTask?.cancel()
-        streamTask = nil
     }
 
     // MARK: - Run Loop
@@ -260,37 +266,10 @@ internal final class FlagSSEClient: @unchecked Sendable {
 
     /// Parses `{"flags": {"key": value, ...}}` into `[String: FlagValue]`.
     private func parseFlags(from json: String) -> [String: FlagValue]? {
-        guard let data = json.data(using: .utf8),
-              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let flagsDict = obj["flags"] as? [String: Any] else {
+        guard let flags = FlagPayloadParser.parse(Data(json.utf8)) else {
             Logger.debug("[Grantiva] SSE: could not parse flags payload")
             return nil
         }
-
-        var result: [String: FlagValue] = [:]
-        for (key, value) in flagsDict {
-            let (rawValue, valueType) = Self.classify(value)
-            result[key] = FlagValue(rawValue: rawValue, valueType: valueType)
-        }
-        return result
-    }
-
-    /// Mirrors `FlagAPIClient.classify` — classifies a JSON value into a raw string + type pair.
-    private static func classify(_ value: Any) -> (String, FlagValueType) {
-        if let nsNumber = value as? NSNumber {
-            if CFGetTypeID(nsNumber) == CFBooleanGetTypeID() {
-                return (nsNumber.boolValue ? "true" : "false", .boolean)
-            }
-            if nsNumber.doubleValue == Double(nsNumber.intValue) {
-                return ("\(nsNumber.intValue)", .integer)
-            }
-            return ("\(nsNumber.doubleValue)", .double)
-        }
-        if let str = value as? String { return (str, .string) }
-        if let data = try? JSONSerialization.data(withJSONObject: value),
-           let jsonStr = String(data: data, encoding: .utf8) {
-            return (jsonStr, .json)
-        }
-        return ("\(value)", .string)
+        return flags
     }
 }

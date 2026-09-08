@@ -33,9 +33,12 @@ internal final class TokenManager: @unchecked Sendable {
         return stored.token
     }
 
+    /// Treats a token as expired `expiryBuffer` seconds early so a token handed
+    /// out by the SDK never dies mid-request.
+    static let expiryBuffer: TimeInterval = 300
+
     func isTokenExpired(_ expiresAt: Date) -> Bool {
-        let bufferTime: TimeInterval = 300
-        return Date().addingTimeInterval(bufferTime) >= expiresAt
+        Date().addingTimeInterval(Self.expiryBuffer) >= expiresAt
     }
     
     func clearTokens() {

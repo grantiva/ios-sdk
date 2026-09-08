@@ -21,7 +21,7 @@ final class FlagSSETests: XCTestCase {
         XCTAssertLessThan(FlagSSEClient.healthyConnectionThreshold, FlagSSEClient.idleTimeout)
     }
 
-    // MARK: - JSON classification (mirrors FlagSSEClient.classify)
+    // MARK: - JSON classification (FlagPayloadParser, shared by REST + SSE)
 
     func testClassifyBoolTrue() {
         let result = parsedFlags(from: #"{"flags":{"feature_x":true}}"#)
@@ -62,6 +62,12 @@ final class FlagSSETests: XCTestCase {
         XCTAssertNil(parsedFlags(from: "not-json"))
         XCTAssertNil(parsedFlags(from: "{}"))
         XCTAssertNil(parsedFlags(from: #"{"flags":null}"#))
+    }
+
+    func testClassifyJSONObject() {
+        let result = parsedFlags(from: #"{"flags":{"config":{"a":1}}}"#)
+        XCTAssertEqual(result?["config"]?.valueType, .json)
+        XCTAssertEqual((result?["config"]?.jsonValue as? [String: Any])?["a"] as? Int, 1)
     }
 
     func testMultipleFlagsInOnePayload() {
@@ -181,30 +187,8 @@ final class FlagSSETests: XCTestCase {
 
     // MARK: - Helpers
 
-    /// Replicates FlagSSEClient's parseFlags logic via public types.
     private func parsedFlags(from json: String) -> [String: FlagValue]? {
-        guard let data = json.data(using: .utf8),
-              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let flagsDict = obj["flags"] as? [String: Any] else { return nil }
-
-        var result: [String: FlagValue] = [:]
-        for (key, value) in flagsDict {
-            if let nsNumber = value as? NSNumber {
-                if CFGetTypeID(nsNumber) == CFBooleanGetTypeID() {
-                    result[key] = FlagValue(rawValue: nsNumber.boolValue ? "true" : "false", valueType: .boolean)
-                } else if nsNumber.doubleValue == Double(nsNumber.intValue) {
-                    result[key] = FlagValue(rawValue: "\(nsNumber.intValue)", valueType: .integer)
-                } else {
-                    result[key] = FlagValue(rawValue: "\(nsNumber.doubleValue)", valueType: .double)
-                }
-            } else if let str = value as? String {
-                result[key] = FlagValue(rawValue: str, valueType: .string)
-            } else if let d = try? JSONSerialization.data(withJSONObject: value),
-                      let s = String(data: d, encoding: .utf8) {
-                result[key] = FlagValue(rawValue: s, valueType: .json)
-            }
-        }
-        return result
+        FlagPayloadParser.parse(Data(json.utf8))
     }
 
     private func makeFlagService() -> FlagService {

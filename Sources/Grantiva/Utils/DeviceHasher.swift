@@ -1,9 +1,9 @@
 import Foundation
-import CommonCrypto
+import CryptoKit
 
 /// Generates a stable, anonymous device hash for spam prevention.
 /// The hash is derived from the vendor identifier and cannot be reversed to identify the device.
-internal class DeviceHasher {
+internal enum DeviceHasher {
 
     /// Returns a SHA-256 hash of the device's vendor identifier, providing a stable
     /// anonymous identifier for rate limiting and spam prevention.
@@ -29,11 +29,6 @@ internal class DeviceHasher {
     }
 
     private static func sha256(_ string: String) -> String {
-        guard let data = string.data(using: .utf8) else { return "" }
-        var hash = [UInt8](repeating: 0, count: Int(CC_SHA256_DIGEST_LENGTH))
-        data.withUnsafeBytes {
-            _ = CC_SHA256($0.baseAddress, CC_LONG(data.count), &hash)
-        }
-        return hash.map { String(format: "%02x", $0) }.joined()
+        SHA256.hash(data: Data(string.utf8)).map { String(format: "%02x", $0) }.joined()
     }
 }

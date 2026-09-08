@@ -1,37 +1,23 @@
 import Foundation
 import DeviceCheck
 
-internal class DeviceCompatibility {
-    
+internal enum DeviceCompatibility {
+
     static func checkCompatibility() throws {
-        guard #available(iOS 14.0, *) else {
-            throw GrantivaError.deviceNotSupported
-        }
-        
         #if targetEnvironment(simulator)
         throw GrantivaError.deviceNotSupported
-        #endif
-        
+        #else
         guard DCAppAttestService.shared.isSupported else {
             throw GrantivaError.attestationNotAvailable
         }
+        #endif
     }
-    
+
     static func isDeviceSupported() -> Bool {
-        guard #available(iOS 14.0, *) else {
-            return false
-        }
-        
         #if targetEnvironment(simulator)
         return false
-        #endif
-        
+        #else
         return DCAppAttestService.shared.isSupported
-    }
-    
-    static func getDeviceInfo() -> [String: String] {
-        var deviceInfo = PlatformSupport.getSystemInfo()
-        deviceInfo["identifierForVendor"] = PlatformSupport.getDeviceIdentifier()
-        return deviceInfo
+        #endif
     }
 }

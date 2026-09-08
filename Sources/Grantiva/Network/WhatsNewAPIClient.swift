@@ -3,34 +3,27 @@ import Foundation
 /// Handles all "What's New" API calls (release note delivery + seen-state).
 internal final class WhatsNewAPIClient: @unchecked Sendable {
     private let configuration: GrantivaConfiguration
-    private let session: URLSession
-    private let teamId: String
-    private let getToken: @Sendable () -> String?
+    private let transport: AuthenticatedTransport
 
-    init(configuration: GrantivaConfiguration, teamId: String, getToken: @escaping @Sendable () -> String? = { nil }) {
-        self.configuration = configuration
-        self.teamId = teamId
-        self.getToken = getToken
-
-        let sessionConfig = URLSessionConfiguration.default
-        sessionConfig.timeoutIntervalForRequest = configuration.timeout
-        sessionConfig.timeoutIntervalForResource = configuration.timeout
-        self.session = URLSession(configuration: sessionConfig)
-    }
-
-    /// Internal seam: injects a pre-built `URLSession` so tests can install a stub
-    /// `URLProtocol`. Not part of the public API; production code uses the
-    /// `init(configuration:teamId:getToken:)` overload.
+    /// - Parameters:
+    ///   - getToken: Returns the current non-expired attestation JWT, or `nil`.
+    ///   - refreshToken: Renews the JWT when it has expired or been rejected. `nil` in API key mode.
+    ///   - session: Internal seam so tests can install a stub `URLProtocol`.
     init(
         configuration: GrantivaConfiguration,
         teamId: String,
         getToken: @escaping @Sendable () -> String? = { nil },
-        session: URLSession
+        refreshToken: (@Sendable () async -> Bool)? = nil,
+        session: URLSession? = nil
     ) {
         self.configuration = configuration
-        self.teamId = teamId
-        self.getToken = getToken
-        self.session = session
+        self.transport = AuthenticatedTransport(
+            configuration: configuration,
+            teamId: teamId,
+            getToken: getToken,
+            refreshToken: refreshToken,
+            session: session
+        )
     }
 
     // MARK: - Release Notes
@@ -43,13 +36,13 @@ internal final class WhatsNewAPIClient: @unchecked Sendable {
     /// one retried endpoint on `GrantivaAPIClient`.
     func fetchReleaseNotes() async throws -> [ReleaseNote] {
         let url = URL(string: "\(configuration.baseURL)/api/v1/whats-new")!
-        let request = makeRequest(url: url, method: "GET")
+        let request = transport.request(url: url, method: "GET")
 
         let data = try await RetryManager.executeWithRetry(
             maxAttempts: max(1, configuration.retryAttempts),
             baseDelay: configuration.retryBaseDelay
         ) { [self] in
-            try await perform(request)
+            try await transport.send(request)
         }
 
         let response = try Self.makeDecoder().decode(WhatsNewResponse.self, from: data)
@@ -66,13 +59,13 @@ internal final class WhatsNewAPIClient: @unchecked Sendable {
     /// the worse outcome of the two.
     func markSeen(_ id: UUID) async throws {
         let url = URL(string: "\(configuration.baseURL)/api/v1/whats-new/\(id.uuidString)/seen")!
-        let request = makeRequest(url: url, method: "POST")
+        let request = transport.request(url: url, method: "POST")
 
         _ = try await RetryManager.executeWithRetry(
             maxAttempts: max(1, configuration.retryAttempts),
             baseDelay: configuration.retryBaseDelay
         ) { [self] in
-            try await perform(request)
+            try await transport.send(request)
         }
     }
 
@@ -89,55 +82,5 @@ internal final class WhatsNewAPIClient: @unchecked Sendable {
     /// Wire shape of `GET /api/v1/whats-new`.
     private struct WhatsNewResponse: Decodable {
         let releaseNotes: [ReleaseNote]
-    }
-
-    // MARK: - Request Helpers
-
-    private func makeRequest(url: URL, method: String) -> URLRequest {
-        var request = URLRequest(url: url)
-        request.httpMethod = method
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        // Always send Bundle ID + Team ID — release notes are authored per app, and the
-        // backend rejects the request without them. Auth precedence: attestation JWT
-        // (real device) > API key (simulator/dev). The backend rejects requests with neither.
-        request.setValue(getBundleId(), forHTTPHeaderField: "X-Bundle-ID")
-        request.setValue(teamId, forHTTPHeaderField: "X-Team-ID")
-        if let token = getToken() {
-            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        } else if let apiKey = configuration.apiKey {
-            request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-        }
-        return request
-    }
-
-    private func perform(_ request: URLRequest) async throws -> Data {
-        do {
-            let (data, response) = try await session.data(for: request)
-
-            guard let httpResponse = response as? HTTPURLResponse else {
-                throw GrantivaError.invalidResponse
-            }
-
-            switch httpResponse.statusCode {
-            case 200...299:
-                return data
-            case 401:
-                throw GrantivaError.validationFailed
-            case 429:
-                throw GrantivaError.rateLimited
-            default:
-                if let errorResponse = try? JSONDecoder().decode(ErrorResponse.self, from: data) {
-                    Logger.error("Server error: \(errorResponse.reason)")
-                }
-                throw GrantivaError.networkError(NSError(domain: "HTTPError", code: httpResponse.statusCode))
-            }
-        } catch {
-            if error is GrantivaError { throw error }
-            throw GrantivaError.networkError(error)
-        }
-    }
-
-    private func getBundleId() -> String {
-        Bundle.main.bundleIdentifier ?? ""
     }
 }

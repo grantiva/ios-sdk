@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+### Bug Fixes
+
+- Feedback, flags and What's New calls no longer fail after the attestation JWT expires. They previously sent whatever token was stored — expired or not — and every call after the one-hour expiry came back `validationFailed` until the app happened to call `validateAttestation()` again. The three clients now share the same plumbing the heartbeat and flag stream got in 2.1.x: an expired token is renewed before the request goes out, and a 401 on a token the SDK believed valid is answered with one refresh and one retry.
+- A cold launch with a still-valid cached token now starts the heartbeat and the SSE flag stream. `validateAttestation()` returned early on the cached path without bringing either up, so live presence and real-time flags silently stayed off until the token expired or the app was backgrounded and resumed. The assertion-refresh path had the same gap for the flag stream.
+- Heartbeats now report the SDK version in `sdkVersion`; they were sending the host app's marketing version.
+- Heartbeats honour the server's `nextHeartbeatSeconds`, floored at 10s, instead of ignoring it.
+- `DCError.serverUnavailable` (code 4) from `attestKey` / `generateAssertion` now surfaces as `GrantivaError.networkError` — a transient Apple-side failure the app can retry — instead of the terminal `validationFailed`.
+- `RetryManager` no longer retries HTTP 4xx responses from the What's New client; only 5xx and 408 are treated as transient.
+- macOS: the hardware model is read from `hw.model` (`hw.machine` reports the CPU architecture there), the serial-number lookup uses the non-deprecated `kIOMainPortDefault`, and a leaked `CFString` from `IORegistryEntryCreateCFProperty` is released.
+- `IdentityProvider` guards its state with a lock; `identify(_:)` from the main thread raced reads from the service actors.
+- `HeartbeatManager` and `FlagSSEClient` cancel their tasks on `deinit`, and `Grantiva` stops both on `deinit`. Previously a released `HeartbeatManager` left its timer task sleeping forever.
+
+### Improvements
+
+- `FlagService.setCacheTTL(_:)` and `WhatsNewService.setCacheTTL(_:)` — `cacheTTL` is actor-isolated, so it could be read but never assigned from outside the actor. The setter closes that gap; the property is now `public private(set)`.
+- `DeviceIntelligence`, `RiskCategory`, `UserContext`, `DeviceContext` and `GrantivaError` are now `Sendable`; `AttestationResult` is `@unchecked Sendable`. All additive.
+- `AttestationResult.customClaims` is now populated on the assertion-refresh path too, when the backend returns `customClaims` on `POST /api/v1/attestation/refresh` (older backends: empty, as before).
+- `refreshToken()` returns the stored `DeviceIntelligence` from the last attestation instead of a placeholder when the token is still valid.
+- Removed dead code: `CustomClaimsProcessor`, `DeviceIntelligenceExtractor`'s local risk heuristics, `DeviceCompatibility.getDeviceInfo`, `KeyManager.clearAttestedFlag`, and the unused `KeyManager` inside `AttestationManager`. None were reachable from the public API.
+
 ### Features
 
 - What's New: new `grantiva.whatsNew` service delivering version-targeted release notes — `getReleaseNotes(forceRefresh:)`, `markSeen(_:)`, and `clearCache()`, plus the `ReleaseNote` model. The backend returns only the notes this device should see (published, for a version the device upgraded *past*, not yet marked seen), newest first; the device's app version is read server-side from its attested profile, so there is nothing to send or configure. Notes are cached in-memory for 5 minutes by default. Additive and backward compatible. **Unattested clients (iOS Simulator, API-key builds) always receive an empty list** — release notes are keyed to the attested device profile, which a simulator never creates.

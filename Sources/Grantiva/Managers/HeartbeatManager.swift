@@ -2,9 +2,10 @@ import Foundation
 
 /// Sends periodic heartbeats to the server to maintain live device presence.
 ///
-/// Starts automatically after attestation succeeds. The server returns the
-/// recommended interval (default 120s). Heartbeats are fire-and-forget —
-/// failures are logged but don't propagate errors.
+/// Starts automatically after attestation succeeds. Beats are sent every
+/// `interval` seconds (default 120) until the server recommends a different
+/// cadence via `nextHeartbeatSeconds`, which then takes over. Heartbeats are
+/// fire-and-forget — failures are logged but don't propagate errors.
 ///
 /// `getToken` must return `nil` for an expired token. When it does, or when the
 /// server answers 401, the manager asks `refreshToken` for a new one before sending
@@ -16,8 +17,14 @@ internal final class HeartbeatManager: @unchecked Sendable {
     private let getDeviceId: () -> String?
     private let refreshToken: (() async -> Bool)?
 
+    private let lock = NSLock()
     private var timerTask: Task<Void, Never>?
     private let interval: TimeInterval
+    /// Interval the server last asked for, if any; overrides `interval`.
+    private var serverInterval: TimeInterval?
+
+    /// Never beat faster than this, whatever the server says.
+    static let minimumServerInterval: TimeInterval = 10
 
     /// - Parameter interval: seconds between heartbeats. Defaults to 120; overridable
     ///   at `internal` visibility only so tests don't have to wait two minutes.
@@ -37,23 +44,43 @@ internal final class HeartbeatManager: @unchecked Sendable {
 
     /// Start sending periodic heartbeats.
     func start() {
-        guard timerTask == nil else { return }
-        timerTask = Task { [weak self] in
-            // Send first heartbeat immediately
-            await self?.sendHeartbeat()
-
-            while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(self?.interval ?? 120))
-                guard !Task.isCancelled else { break }
+        lock.withLock {
+            guard timerTask == nil else { return }
+            timerTask = Task { [weak self] in
+                // Send first heartbeat immediately
                 await self?.sendHeartbeat()
+
+                while !Task.isCancelled {
+                    // Drop out once the manager is gone instead of sleeping forever.
+                    guard let delay = self?.currentInterval else { return }
+                    try? await Task.sleep(for: .seconds(delay))
+                    guard !Task.isCancelled else { break }
+                    await self?.sendHeartbeat()
+                }
             }
         }
     }
 
     /// Stop sending heartbeats.
     func stop() {
+        let task: Task<Void, Never>? = lock.withLock {
+            defer { timerTask = nil }
+            return timerTask
+        }
+        task?.cancel()
+    }
+
+    deinit {
         timerTask?.cancel()
-        timerTask = nil
+    }
+
+    private var currentInterval: TimeInterval {
+        lock.withLock { serverInterval ?? interval }
+    }
+
+    private func adopt(serverInterval next: TimeInterval?) {
+        guard let next else { return }
+        lock.withLock { serverInterval = max(next, Self.minimumServerInterval) }
     }
 
     private func sendHeartbeat() async {
@@ -71,7 +98,7 @@ internal final class HeartbeatManager: @unchecked Sendable {
         }
 
         do {
-            try await send(token: token)
+            adopt(serverInterval: try await send(token: token))
         } catch let error where Self.isUnauthorized(error) {
             // The server disagrees with our view of the token (revoked, clock skew,
             // rotated signing key). Refresh once and retry once; give up otherwise.
@@ -80,7 +107,7 @@ internal final class HeartbeatManager: @unchecked Sendable {
                 return
             }
             do {
-                try await send(token: getToken())
+                adopt(serverInterval: try await send(token: getToken()))
             } catch {
                 Logger.debug("[Grantiva] Heartbeat failed after token refresh: \(error.localizedDescription)")
             }
@@ -89,7 +116,7 @@ internal final class HeartbeatManager: @unchecked Sendable {
         }
     }
 
-    private func send(token: String?) async throws {
+    private func send(token: String?) async throws -> TimeInterval? {
         try await apiClient.sendHeartbeat(
             token: token,
             deviceId: getDeviceId(),
