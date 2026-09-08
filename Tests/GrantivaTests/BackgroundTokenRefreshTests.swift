@@ -33,6 +33,15 @@ final class BackgroundTokenRefreshTests: XCTestCase {
 
     // MARK: - TokenRefreshCoordinator
 
+    func testBackgroundRefreshForcesRenewalInsteadOfAcceptingCachedToken() async {
+        let owner = RefreshSpy()
+        let refresher = BackgroundTokenRefresher()
+        refresher.owner = owner
+        let succeeded = await refresher.refresh()
+        XCTAssertFalse(succeeded)
+        XCTAssertEqual(owner.forceRefreshRequests, [true])
+    }
+
     func testConcurrentRefreshesRunTheOperationOnce() async {
         let coordinator = TokenRefreshCoordinator()
         let runs = Counter()
@@ -259,6 +268,17 @@ final class BackgroundTokenRefreshTests: XCTestCase {
 
     func testAuthRetryDelayIsMuchLongerThanReconnectBackoff() {
         XCTAssertGreaterThanOrEqual(FlagSSEClient.authRetryDelay, 60)
+    }
+}
+
+private final class RefreshSpy: Grantiva {
+    var forceRefreshRequests: [Bool] = []
+
+    init() { super.init(teamId: "TEST", apiKey: "test-key") }
+
+    override func validateAttestation(forceRefresh: Bool) async throws -> AttestationResult {
+        forceRefreshRequests.append(forceRefresh)
+        throw GrantivaError.validationFailed
     }
 }
 

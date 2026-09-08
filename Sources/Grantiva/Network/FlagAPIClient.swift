@@ -30,13 +30,16 @@ internal final class FlagAPIClient: @unchecked Sendable {
     ///
     /// The backend returns `{ "flags": { "key": typedValue, ... } }` where values are
     /// natively typed (bools, ints, doubles, strings, objects); see `FlagPayloadParser`.
-    func fetchFlags(environment: FlagEnvironment) async throws -> [String: FlagValue] {
+    func fetchFlags(environment: FlagEnvironment, contextHeaders: [String: String] = [:]) async throws -> [String: FlagValue] {
         var components = URLComponents(string: "\(configuration.baseURL)/api/v1/flags")!
         components.queryItems = [
             URLQueryItem(name: "environment", value: environment.rawValue)
         ]
 
-        let request = transport.request(url: components.url!, method: "GET")
+        var request = transport.request(url: components.url!, method: "GET")
+        for (name, value) in contextHeaders {
+            request.setValue(value, forHTTPHeaderField: name)
+        }
         let data = try await transport.send(request)
 
         guard let flags = FlagPayloadParser.parse(data) else {
