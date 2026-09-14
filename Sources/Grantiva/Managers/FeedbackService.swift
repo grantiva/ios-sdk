@@ -184,10 +184,13 @@ public actor FeedbackService {
         return result
     }
 
-    /// Get all tickets submitted by the current user (or device if not identified).
+    /// Get tickets owned by the current authenticated device key (or API key).
     ///
-    /// If `grantiva.identify("user_123")` has been called, returns tickets for that user
-    /// across all their devices. Otherwise returns tickets from this device only.
+    /// `identify(_:)` supplies display metadata, not verified user authentication,
+    /// and does not grant access to tickets from other devices. A new attestation
+    /// key or a different API key does not inherit the previous key's tickets.
+    /// Legacy tickets without verified ownership remain available to your staff
+    /// through the dashboard and org API.
     ///
     /// - Returns: An array of support tickets.
     public func getUsersTickets() async throws -> [SupportTicket] {

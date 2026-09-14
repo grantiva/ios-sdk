@@ -60,6 +60,19 @@ if try await grantiva.flags.boolValue(for: "dark_mode") {
 > ```
 > In this mode `riskScore` is `nil` and no attestation record appears in the dashboard.
 
+### Support ticket ownership
+
+Support tickets are scoped to the authenticated device attestation key, or to the
+API key used in simulator/development mode. `identify(_:)` supplies a user label;
+it does not verify that user's identity or unlock tickets from other devices.
+`getUsersTickets()` lists tickets owned by the current credential. Rotating that
+credential does not transfer ticket ownership. Avoid sharing development API keys
+between users who need separate ticket access.
+
+Tickets created before verified ownership was introduced remain available to
+staff through the dashboard and org API/CLI. They are not automatically assigned
+to a device from their old, caller-supplied user ID or device hash.
+
 ## Attestation
 
 ```swift
